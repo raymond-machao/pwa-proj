@@ -1,0 +1,1 @@
+請將此資料夾放到 HTTPS 網址後，以 iPhone Safari 開啟 index.html，使用『加入主畫面』安裝。行程可離線閱讀；手機新增的記帳資料保存在該手機瀏覽器。backup.trip.json 是匯出當刻的電腦端備份；手機本機記帳須在 PWA 內另行匯出。
