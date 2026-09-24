@@ -1,0 +1,27 @@
+{
+  "name": "東京・河口湖・箱根 六日遊",
+  "short_name": "旅行",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#faf6f0",
+  "theme_color": "#b54a14",
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}
