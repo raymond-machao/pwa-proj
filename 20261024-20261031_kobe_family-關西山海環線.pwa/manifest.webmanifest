@@ -1,9 +1,10 @@
 {
-  "name": "神戶・海之京都｜森之京都",
-  "short_name": "旅行",
+  "name": "261024-31神戶",
+  "short_name": "261024-31神戶",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
+  "orientation": "portrait",
   "background_color": "#faf6f0",
   "theme_color": "#b54a14",
   "icons": [
