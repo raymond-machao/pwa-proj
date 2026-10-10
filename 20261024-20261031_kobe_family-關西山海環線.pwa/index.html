@@ -367,7 +367,9 @@ html[data-text-size="lg"] body{font-size:20px}
 html[data-text-size="lg"] .hero h1{font-size:25px}
 html[data-text-size="lg"] .hero p{font-size:15.5px}
 html[data-text-size="lg"] .day h2{font-size:23px}
-html[data-text-size="lg"] .place-title h3,html[data-text-size="lg"] .plain-title h3{font-size:19.5px}
+html[data-text-size="lg"] .place-title h3,
+html[data-text-size="lg"] .plain-title h3,
+html[data-text-size="lg"] .flight-airport span{font-size:19.5px!important;line-height:1.25!important}
 html[data-text-size="lg"] time,
 html[data-text-size="lg"] .stop time,
 html[data-text-size="lg"] .stop time *,
@@ -376,10 +378,24 @@ html[data-text-size="lg"] .time-start,
 html[data-text-size="lg"] .time-sep,
 html[data-text-size="lg"] .time-end{font-size:16px!important;line-height:1.2!important}
 :is(html,body)[data-text-size="lg"] :is(.timeline,.default) .time-end{font-size:13.5px!important}
-html[data-text-size="lg"] .detail p,html[data-text-size="lg"] .notes-card-inner,html[data-text-size="lg"] .pack-name{font-size:16.5px}
-html[data-text-size="lg"] .kind,html[data-text-size="lg"] .leg,html[data-text-size="lg"] .flight-middle,html[data-text-size="lg"] .website{font-size:15px}
-html[data-text-size="lg"] .day-tab-num{font-size:14px}
-html[data-text-size="lg"] .day-tab-date{font-size:11.5px}
+:is(html,body)[data-text-size="lg"] :is(.timeline-step,.stop) .marker,
+html[data-text-size="lg"] .marker,
+html[data-text-size="lg"] .flight-number{font-size:13.5px!important;width:24px!important;height:24px!important}
+html[data-text-size="lg"] .detail p,html[data-text-size="lg"] .notes-card-inner,html[data-text-size="lg"] .pack-name,html[data-text-size="lg"] .flight-detail,html[data-text-size="lg"] .flight-detail *{font-size:16.5px!important}
+html[data-text-size="lg"] .kind,html[data-text-size="lg"] .leg,html[data-text-size="lg"] .flight-middle,html[data-text-size="lg"] .flight-middle *,html[data-text-size="lg"] .flight-duration,html[data-text-size="lg"] .website{font-size:15px!important}
+:is(.timeline,.default,.tab,.compact,.schedule,.ticket,.rail,.hub,.booklet,.story)[data-text-size="lg"] :is(.day-nav,.subnav-itinerary) .day-tab,
+:is(html,body)[data-text-size="lg"] :is(.day-nav,.subnav-itinerary) .day-tab,
+:is(html,body)[data-text-size="lg"] .day-tab{height:38px!important;min-width:52px!important;padding:4px 9px!important}
+:is(.timeline,.default,.tab,.compact,.schedule,.ticket,.rail,.hub,.booklet,.story)[data-text-size="lg"] :is(.day-nav,.subnav-itinerary) .day-tab-num,
+:is(html,body)[data-text-size="lg"] :is(.day-nav,.subnav-itinerary) .day-tab-num,
+:is(html,body)[data-text-size="lg"] .day-tab-num{font-size:14.5px!important;line-height:1.15!important}
+:is(.timeline,.default,.tab,.compact,.schedule,.ticket,.rail,.hub,.booklet,.story)[data-text-size="lg"] :is(.day-nav,.subnav-itinerary) .day-tab-date,
+:is(html,body)[data-text-size="lg"] :is(.day-nav,.subnav-itinerary) .day-tab-date,
+:is(html,body)[data-text-size="lg"] .day-tab-date{font-size:12px!important;line-height:1.1!important}
+:is(.timeline,.default,.tab,.compact,.schedule,.ticket,.rail,.hub,.booklet,.story)[data-text-size="lg"] :is(.day-nav,.subnav-itinerary) .day-tab > .day-tab-num:only-child,
+:is(html,body)[data-text-size="lg"] :is(.day-nav,.subnav-itinerary) .day-tab > .day-tab-num:only-child,
+:is(html,body)[data-text-size="lg"] .day-tab > .day-tab-num:only-child{font-size:15px!important}
+html[data-text-size="lg"] .feature-nav .nav-text{font-size:12.5px!important}
 html[data-text-size="lg"] .pack-item,html[data-text-size="lg"] .pack-item span{font-size:16.5px!important;line-height:1.35!important}
 html[data-text-size="lg"] .pack-item{padding:9px 0}
 html[data-text-size="lg"] .pack-item input[type="checkbox"]{width:20px;height:20px}
@@ -425,6 +441,9 @@ html[data-text-size="lg"] .stop-top time{margin-left:auto}
 :is(html,body)[data-text-size="lg"].default .flight-line,
 html[data-text-size="lg"] :is(.timeline,.default) .timeline-step .stop,
 html[data-text-size="lg"] :is(.timeline,.default) .flight-line{grid-template-columns:52px 24px 1fr!important;column-gap:6px!important}
+:is(html,body)[data-text-size="lg"].timeline .timeline-step .stop .marker,
+:is(html,body)[data-text-size="lg"].default .timeline-step .stop .marker,
+html[data-text-size="lg"] :is(.timeline,.default) .timeline-step .stop .marker{width:24px!important;height:24px!important;font-size:13.5px!important}
 :is(html,body)[data-text-size="lg"].timeline .timeline-step:not(:last-child)::before,
 :is(html,body)[data-text-size="lg"].default .timeline-step:not(:last-child)::before,
 html[data-text-size="lg"] :is(.timeline,.default) .timeline-step:not(:last-child)::before{left:69px!important}
@@ -458,7 +477,9 @@ html[data-text-size="xl"] body{font-size:24.5px}
 html[data-text-size="xl"] .hero h1{font-size:29px}
 html[data-text-size="xl"] .hero p{font-size:18px}
 html[data-text-size="xl"] .day h2{font-size:27px}
-html[data-text-size="xl"] .place-title h3,html[data-text-size="xl"] .plain-title h3{font-size:23px}
+html[data-text-size="xl"] .place-title h3,
+html[data-text-size="xl"] .plain-title h3,
+html[data-text-size="xl"] .flight-airport span{font-size:23px!important;line-height:1.25!important}
 html[data-text-size="xl"] time,
 html[data-text-size="xl"] .stop time,
 html[data-text-size="xl"] .stop time *,
@@ -467,10 +488,24 @@ html[data-text-size="xl"] .time-start,
 html[data-text-size="xl"] .time-sep,
 html[data-text-size="xl"] .time-end{font-size:19px!important;line-height:1.2!important}
 :is(html,body)[data-text-size="xl"] :is(.timeline,.default) .time-end{font-size:16px!important}
-html[data-text-size="xl"] .detail p,html[data-text-size="xl"] .notes-card-inner,html[data-text-size="xl"] .pack-name{font-size:20px}
-html[data-text-size="xl"] .kind,html[data-text-size="xl"] .leg,html[data-text-size="xl"] .flight-middle,html[data-text-size="xl"] .website{font-size:17.5px}
-html[data-text-size="xl"] .day-tab-num{font-size:16px}
-html[data-text-size="xl"] .day-tab-date{font-size:13px}
+:is(html,body)[data-text-size="xl"] :is(.timeline-step,.stop) .marker,
+html[data-text-size="xl"] .marker,
+html[data-text-size="xl"] .flight-number{font-size:15.5px!important;width:26px!important;height:26px!important}
+html[data-text-size="xl"] .detail p,html[data-text-size="xl"] .notes-card-inner,html[data-text-size="xl"] .pack-name,html[data-text-size="xl"] .flight-detail,html[data-text-size="xl"] .flight-detail *{font-size:20px!important}
+html[data-text-size="xl"] .kind,html[data-text-size="xl"] .leg,html[data-text-size="xl"] .flight-middle,html[data-text-size="xl"] .flight-middle *,html[data-text-size="xl"] .flight-duration,html[data-text-size="xl"] .website{font-size:18px!important}
+:is(.timeline,.default,.tab,.compact,.schedule,.ticket,.rail,.hub,.booklet,.story)[data-text-size="xl"] :is(.day-nav,.subnav-itinerary) .day-tab,
+:is(html,body)[data-text-size="xl"] :is(.day-nav,.subnav-itinerary) .day-tab,
+:is(html,body)[data-text-size="xl"] .day-tab{height:44px!important;min-width:60px!important;padding:5px 11px!important}
+:is(.timeline,.default,.tab,.compact,.schedule,.ticket,.rail,.hub,.booklet,.story)[data-text-size="xl"] :is(.day-nav,.subnav-itinerary) .day-tab-num,
+:is(html,body)[data-text-size="xl"] :is(.day-nav,.subnav-itinerary) .day-tab-num,
+:is(html,body)[data-text-size="xl"] .day-tab-num{font-size:17px!important;line-height:1.15!important}
+:is(.timeline,.default,.tab,.compact,.schedule,.ticket,.rail,.hub,.booklet,.story)[data-text-size="xl"] :is(.day-nav,.subnav-itinerary) .day-tab-date,
+:is(html,body)[data-text-size="xl"] :is(.day-nav,.subnav-itinerary) .day-tab-date,
+:is(html,body)[data-text-size="xl"] .day-tab-date{font-size:14px!important;line-height:1.1!important}
+:is(.timeline,.default,.tab,.compact,.schedule,.ticket,.rail,.hub,.booklet,.story)[data-text-size="xl"] :is(.day-nav,.subnav-itinerary) .day-tab > .day-tab-num:only-child,
+:is(html,body)[data-text-size="xl"] :is(.day-nav,.subnav-itinerary) .day-tab > .day-tab-num:only-child,
+:is(html,body)[data-text-size="xl"] .day-tab > .day-tab-num:only-child{font-size:17.5px!important}
+html[data-text-size="xl"] .feature-nav .nav-text{font-size:14.5px!important}
 html[data-text-size="xl"] .pack-item,html[data-text-size="xl"] .pack-item span{font-size:20px!important;line-height:1.35!important}
 html[data-text-size="xl"] .pack-item{padding:12px 0}
 html[data-text-size="xl"] .pack-item input[type="checkbox"]{width:24px;height:24px}
@@ -518,7 +553,7 @@ html[data-text-size="xl"] :is(.timeline,.default) .timeline-step .stop,
 html[data-text-size="xl"] :is(.timeline,.default) .flight-line{grid-template-columns:66px 26px 1fr!important;column-gap:8px!important}
 :is(html,body)[data-text-size="xl"].timeline .timeline-step .stop .marker,
 :is(html,body)[data-text-size="xl"].default .timeline-step .stop .marker,
-html[data-text-size="xl"] :is(.timeline,.default) .timeline-step .stop .marker{width:26px!important;height:26px!important;font-size:13px!important}
+html[data-text-size="xl"] :is(.timeline,.default) .timeline-step .stop .marker{width:26px!important;height:26px!important;font-size:15.5px!important}
 :is(html,body)[data-text-size="xl"].timeline .timeline-step:not(:last-child)::before,
 :is(html,body)[data-text-size="xl"].default .timeline-step:not(:last-child)::before,
 html[data-text-size="xl"] :is(.timeline,.default) .timeline-step:not(:last-child)::before{left:86px!important}
@@ -542,13 +577,13 @@ html[data-text-size="xl"] .rail .flight-stop{margin-left:90px!important}
 :is(html,body)[data-text-size="xl"].classic .stop,
 html[data-text-size="xl"] .classic .stop{grid-template-columns:32px 1fr!important;gap:12px!important}
 :is(html,body)[data-text-size="xl"].classic .timeline-step .stop .marker,
-html[data-text-size="xl"] .classic .timeline-step .stop .marker{width:28px!important;height:28px!important;font-size:13px!important}
+html[data-text-size="xl"] .classic .timeline-step .stop .marker{width:28px!important;height:28px!important;font-size:15.5px!important}
 :is(html,body)[data-text-size="xl"].classic .timeline-step:not(:last-child)::before,
 html[data-text-size="xl"] .classic .timeline-step:not(:last-child)::before{left:15px!important}
 :is(html,body)[data-text-size="xl"].classic .leg,
 html[data-text-size="xl"] .classic .leg{padding-left:44px!important}
 
-</style><style id="travel-boot-day">.feature-page[id^="itinerary-"] > .day{display:none!important}.feature-page[id^="itinerary-"] > #day-1-zh,.feature-page[id^="itinerary-"] > #day-1-en{display:block!important}</style><script>(()=>{const dates=["2026-10-24","2026-10-25","2026-10-26","2026-10-27","2026-10-28","2026-10-29","2026-10-30","2026-10-31"];const now=new Date();const today=[now.getFullYear(),String(now.getMonth()+1).padStart(2,"0"),String(now.getDate()).padStart(2,"0")].join("-");const override=0;const day=override>=1&&override<=dates.length?override:Math.max(1,dates.indexOf(today)+1);document.getElementById("travel-boot-day").textContent='.feature-page[id^="itinerary-"] > .day{display:none!important}.feature-page[id^="itinerary-"] > #day-'+day+'-zh,.feature-page[id^="itinerary-"] > #day-'+day+'-en{display:block!important}';try{const s=localStorage.getItem("travel-font-size");if(s==="lg"||s==="xl")document.documentElement.dataset.textSize=s;}catch(e){}})()</script><meta name="travel-release" content="508e5f66e8db48c8af86d991cb6847eb"><meta name="travel-pwa" content="1"></head><body><div id="safari-scroll-indicator" class="safari-scroll-indicator" aria-hidden="true"></div><main class="wrap"><header class="hero"><div class="hero-top"><h1>神戶・海之京都｜森之京都</h1><button type="button" class="text-size-btn" id="text-size-toggle" aria-label="字體大小：預設" title="字體大小：預設"><svg class="text-size-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19L8.5 5.5L13 19"/><path d="M5.8 14H11.2"/><path d="M14.5 19L17.5 9.5L20.5 19"/><path d="M15.5 16H19.5"/></svg></button></div><div class="hero-meta"><p class="hero-subline"><span class="hero-dates">2026-10-24 — 2026-10-31</span><span class="hero-dest-sep"> · </span><span class="hero-dest">KOBE</span></p><p class="hero-note">Family (關西山海環線)</p></div><div class="hero-day-nav"><nav class="day-nav subnav-itinerary" aria-label="行程日期"><a href="#day-1-zh" data-day-index="0" data-day-date="2026-10-24" class="day-tab"><span class="day-tab-num">D1</span><span class="day-tab-date">10/24</span></a><a href="#day-2-zh" data-day-index="1" data-day-date="2026-10-25" class="day-tab"><span class="day-tab-num">D2</span><span class="day-tab-date">10/25</span></a><a href="#day-3-zh" data-day-index="2" data-day-date="2026-10-26" class="day-tab"><span class="day-tab-num">D3</span><span class="day-tab-date">10/26</span></a><a href="#day-4-zh" data-day-index="3" data-day-date="2026-10-27" class="day-tab"><span class="day-tab-num">D4</span><span class="day-tab-date">10/27</span></a><a href="#day-5-zh" data-day-index="4" data-day-date="2026-10-28" class="day-tab"><span class="day-tab-num">D5</span><span class="day-tab-date">10/28</span></a><a href="#day-6-zh" data-day-index="5" data-day-date="2026-10-29" class="day-tab"><span class="day-tab-num">D6</span><span class="day-tab-date">10/29</span></a><a href="#day-7-zh" data-day-index="6" data-day-date="2026-10-30" class="day-tab"><span class="day-tab-num">D7</span><span class="day-tab-date">10/30</span></a><a href="#day-8-zh" data-day-index="7" data-day-date="2026-10-31" class="day-tab"><span class="day-tab-num">D8</span><span class="day-tab-date">10/31</span></a></nav><nav class="day-nav subnav-references" style="display:none" aria-label="口袋名單分類"><a href="#ref-spots-zh" data-target-card="ref-spots-zh" class="day-tab active"><span class="day-tab-num">景點</span><span class="day-tab-date count-badge">0</span></a><a href="#ref-food-zh" data-target-card="ref-food-zh" class="day-tab"><span class="day-tab-num">美食</span><span class="day-tab-date count-badge">0</span></a></nav><nav class="day-nav subnav-packing" style="display:none" aria-label="行前準備分類"><a href="#pack-group-1-zh" data-target-card="pack-group-1-zh" class="day-tab active"><span class="day-tab-num">行前必做</span><span class="day-tab-date count-badge pack-nav-badge" data-group-badge="1">0/5</span></a><a href="#pack-group-2-zh" data-target-card="pack-group-2-zh" class="day-tab"><span class="day-tab-num">電子產品</span><span class="day-tab-date count-badge pack-nav-badge" data-group-badge="2">0/5</span></a><a href="#pack-group-3-zh" data-target-card="pack-group-3-zh" class="day-tab"><span class="day-tab-num">必帶</span><span class="day-tab-date count-badge pack-nav-badge" data-group-badge="3">0/6</span></a></nav></div></header><div id="mobile-content"><input class="static-lang-input" type="radio" name="language" id="static-lang-zh" checked><input class="static-lang-input" type="radio" name="language" id="static-lang-en"><div class="static-content"><div class="lang-content-zh"><nav class="feature-nav">
+</style><style id="travel-boot-day">.feature-page[id^="itinerary-"] > .day{display:none!important}.feature-page[id^="itinerary-"] > #day-1-zh,.feature-page[id^="itinerary-"] > #day-1-en{display:block!important}</style><script>(()=>{const dates=["2026-10-24","2026-10-25","2026-10-26","2026-10-27","2026-10-28","2026-10-29","2026-10-30","2026-10-31"];const now=new Date();const today=[now.getFullYear(),String(now.getMonth()+1).padStart(2,"0"),String(now.getDate()).padStart(2,"0")].join("-");const override=0;const day=override>=1&&override<=dates.length?override:Math.max(1,dates.indexOf(today)+1);document.getElementById("travel-boot-day").textContent='.feature-page[id^="itinerary-"] > .day{display:none!important}.feature-page[id^="itinerary-"] > #day-'+day+'-zh,.feature-page[id^="itinerary-"] > #day-'+day+'-en{display:block!important}';try{const s=localStorage.getItem("travel-font-size");if(s==="lg"||s==="xl")document.documentElement.dataset.textSize=s;}catch(e){}})()</script><meta name="travel-release" content="ccaf0cf99f654c3d9130b31665ac739b"><meta name="travel-pwa" content="1"></head><body><div id="safari-scroll-indicator" class="safari-scroll-indicator" aria-hidden="true"></div><main class="wrap"><header class="hero"><div class="hero-top"><h1>神戶・海之京都｜森之京都</h1><button type="button" class="text-size-btn" id="text-size-toggle" aria-label="字體大小：預設" title="字體大小：預設"><svg class="text-size-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 18L8.2 5.5h1.6L14.5 18"/><path d="M5.5 13.5h7"/><path d="M21 11v7"/><path d="M21 14.5a3.5 3.5 0 1 1-7 0 3.5 3.5 0 0 1 7 0z"/></svg></button></div><div class="hero-meta"><p class="hero-subline"><span class="hero-dates">2026-10-24 — 2026-10-31</span><span class="hero-dest-sep"> · </span><span class="hero-dest">KOBE</span></p><p class="hero-note">Family (關西山海環線)</p></div><div class="hero-day-nav"><nav class="day-nav subnav-itinerary" aria-label="行程日期"><a href="#day-1-zh" data-day-index="0" data-day-date="2026-10-24" class="day-tab"><span class="day-tab-num">D1</span><span class="day-tab-date">10/24</span></a><a href="#day-2-zh" data-day-index="1" data-day-date="2026-10-25" class="day-tab"><span class="day-tab-num">D2</span><span class="day-tab-date">10/25</span></a><a href="#day-3-zh" data-day-index="2" data-day-date="2026-10-26" class="day-tab"><span class="day-tab-num">D3</span><span class="day-tab-date">10/26</span></a><a href="#day-4-zh" data-day-index="3" data-day-date="2026-10-27" class="day-tab"><span class="day-tab-num">D4</span><span class="day-tab-date">10/27</span></a><a href="#day-5-zh" data-day-index="4" data-day-date="2026-10-28" class="day-tab"><span class="day-tab-num">D5</span><span class="day-tab-date">10/28</span></a><a href="#day-6-zh" data-day-index="5" data-day-date="2026-10-29" class="day-tab"><span class="day-tab-num">D6</span><span class="day-tab-date">10/29</span></a><a href="#day-7-zh" data-day-index="6" data-day-date="2026-10-30" class="day-tab"><span class="day-tab-num">D7</span><span class="day-tab-date">10/30</span></a><a href="#day-8-zh" data-day-index="7" data-day-date="2026-10-31" class="day-tab"><span class="day-tab-num">D8</span><span class="day-tab-date">10/31</span></a></nav><nav class="day-nav subnav-references" style="display:none" aria-label="口袋名單分類"><a href="#ref-spots-zh" data-target-card="ref-spots-zh" class="day-tab active"><span class="day-tab-num">景點</span><span class="day-tab-date count-badge">0</span></a><a href="#ref-food-zh" data-target-card="ref-food-zh" class="day-tab"><span class="day-tab-num">美食</span><span class="day-tab-date count-badge">0</span></a></nav><nav class="day-nav subnav-packing" style="display:none" aria-label="行前準備分類"><a href="#pack-group-1-zh" data-target-card="pack-group-1-zh" class="day-tab active"><span class="day-tab-num">行前必做</span><span class="day-tab-date count-badge pack-nav-badge" data-group-badge="1">0/5</span></a><a href="#pack-group-2-zh" data-target-card="pack-group-2-zh" class="day-tab"><span class="day-tab-num">電子產品</span><span class="day-tab-date count-badge pack-nav-badge" data-group-badge="2">0/5</span></a><a href="#pack-group-3-zh" data-target-card="pack-group-3-zh" class="day-tab"><span class="day-tab-num">必帶</span><span class="day-tab-date count-badge pack-nav-badge" data-group-badge="3">0/6</span></a></nav></div></header><div id="mobile-content"><input class="static-lang-input" type="radio" name="language" id="static-lang-zh" checked><input class="static-lang-input" type="radio" name="language" id="static-lang-en"><div class="static-content"><div class="lang-content-zh"><nav class="feature-nav">
       <button type="button" data-feature-target="packing-zh" class="nav-btn-tab">
         <span class="nav-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="m9 14 2 2 4-4"/></svg></span>
         <span class="nav-text">行前準備</span>
