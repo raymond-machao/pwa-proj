@@ -5,7 +5,7 @@ const META=PREFIX+'metadata';
 const BOOT=PREFIX+'v10';
 const pointer=new URL('__active_release__',SCOPE).href;
 async function active(){const m=await caches.open(META);const r=await m.match(pointer);return r?await r.text():BOOT;}
-function validPath(path){return /^(?:index\.html|manifest\.webmanifest|sw\.js|icon\.svg|icon-192\.png|icon-512\.png|apple-touch-icon\.png|maps\/[a-f0-9]{64}\.(?:png|webp))$/.test(path);}
+function validPath(path){return /^(?:index\.html|manifest\.webmanifest|sw\.js|icon\.svg|icon-192\.png|icon-512\.png|apple-touch-icon\.png|editor\/js\/[\w./-]+\.js|maps\/[a-f0-9]{64}\.(?:png|webp))$/.test(path)&&!path.split('/').includes('..');}
 async function valid(response,hash){
  if(!response?.ok||!/^[a-f0-9]{64}$/.test(hash))return false;
  const digest=await crypto.subtle.digest('SHA-256',await response.clone().arrayBuffer());
