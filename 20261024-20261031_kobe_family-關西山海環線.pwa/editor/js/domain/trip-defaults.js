@@ -57,7 +57,7 @@ export function newStop() {
 // A candidate is deliberately one simple bucket.  Its kind is only a filter,
 // so a restaurant is not forced into a deeper food taxonomy.
 export function newReference() {
-  return { id: id(), kind: "景點", name: "", group: "", address: "", website: "", note: "", image: null, dayId: "", sourceUrl: "", createdAt: new Date().toISOString() };
+  return { id: id(), kind: "景點", name: "", group: "", address: "", website: "", note: "", image: null, dayId: "", sourceUrl: "", checked: false, createdAt: new Date().toISOString() };
 }
 
 export function newNote() {

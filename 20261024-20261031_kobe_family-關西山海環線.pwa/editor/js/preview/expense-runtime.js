@@ -15,7 +15,7 @@ export function expenseRuntimeScript({ homeCurrency, currencyRates, distinctCurr
     write(":expenses", v);
     window.dispatchEvent(new Event("travel-preview-change"));
   }
-  window.getTravelPreviewState = () => JSON.parse(JSON.stringify({ packing: read(":packing", INITIAL_PACKING), expenses: readExpenses().map(normExpense) }));
+  window.getTravelPreviewState = () => JSON.parse(JSON.stringify({ packing: read(":packing", INITIAL_PACKING), references: read(":references", INITIAL_REFERENCES), expenses: readExpenses().map(normExpense) }));
   function toTwd(amount, currency) {
     var c = String(currency || HOME).toUpperCase();
     if (c === HOME) return amount;
