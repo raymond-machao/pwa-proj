@@ -26,15 +26,6 @@ export function installMobileShare({ tools, trip, baseline, readState }) {
     } finally { busy = false; button.disabled = false; }
   }
   return function mount() {
-    document.querySelectorAll('#mobile-content .feature-page').forEach(page => {
-      if (!/^expenses-/.test(page.id) || page.querySelector('.mobile-share')) return;
-      const button = document.createElement('button');
-      button.type = 'button'; button.className = 'mobile-share';
-      button.dataset.language = page.id.endsWith('-en') ? 'en' : 'zh';
-      button.textContent = button.dataset.language === 'en' ? 'Share expenses & checklist' : '分享記帳與清單';
-      button.style.cssText = 'display:block;margin:12px 0;padding:8px 12px;border:1px solid #d7b99f;border-radius:9px;background:#fff;color:#9a431a;font:inherit;font-size:13px;max-width:100%';
-      button.onclick = () => share(button);
-      page.append(button);
-    });
+    // Disabled - PWA cloud and memory sync replaces manual mobile MD sharing
   };
 }

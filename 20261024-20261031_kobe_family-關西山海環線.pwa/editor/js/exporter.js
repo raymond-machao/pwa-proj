@@ -505,7 +505,12 @@ export function buildMobileHtml(trip, mapAssets = {}) {
       : "";
     const reportAddButton = `<button type="button" class="day-action day-expense" aria-label="${language === "en" ? "Add expense" : "新增記帳"}" title="${language === "en" ? "Add expense" : "新增記帳"}" data-expense-day="" data-expense-date=""><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5.5" width="18" height="14" rx="2.6"/><path d="M3 10h18"/><circle cx="15.6" cy="14.2" r="1.9" fill="currentColor" stroke="none"/></svg></button>`;
 
-    return `<div class="expense-page-head"><h2>${language === "en" ? "Spending" : "記帳"}</h2><div class="expense-head-actions">${reportSettleButton}${reportAddButton}</div></div><div class="expense-report"><div class="expense-totals"></div><div class="expense-filter-bar"><div class="efilter-select-wrap"><select class="efilter-day" aria-label="天數"><option value="">${language === "en" ? "All Days" : "全部天數"}</option><option value="day-0">${language === "en" ? "Day 0 · Before trip" : "Day 0 · 行前"}</option>${trip.days.map((d, i) => `<option value="${escAttr(d.id)}">${language === "en" ? `Day ${i + 1}` : `第 ${i + 1} 天`}${d.date ? ` (${escAttr(d.date.slice(5))})` : ""}</option>`).join("")}</select></div><div class="efilter-select-wrap"><select class="efilter-cat" aria-label="類別"><option value="">${language === "en" ? "All Categories" : "所有類別"}</option>${expenseCategories.map(c => `<option value="${escAttr(c)}">${esc(c)}</option>`).join("")}</select></div>${membersActive.length > 1 ? `<div class="efilter-select-wrap"><select class="efilter-mem" aria-label="成員"><option value="">${language === "en" ? "All Travelers" : "所有成員"}</option>${membersActive.map(m => `<option value="${escAttr(m.id)}">${esc(m.name)}</option>`).join("")}</select></div>` : ""}</div><div class="expense-charts-block"><div class="chart-box"><div class="chart-header"><strong>類別佔比</strong></div><div class="donut-container"></div></div><div class="chart-box"><div class="chart-header"><strong>各類花費排行</strong></div><div class="rank-bars-container"></div></div><div class="chart-box"><div class="chart-header"><strong>每日花費趨勢</strong></div><div class="daily-bars-container"></div></div></div><div class="expense-days-block"><div class="block-header"><strong>消費明細</strong><span class="block-sub">長按單筆可看各幣別換算</span></div><div class="days-container"></div></div></div>`;
+    const catChartTitle = language === "en" ? "Category Breakdown" : "類別佔比";
+    const dailyChartTitle = language === "en" ? "Daily Trend" : "每日花費趨勢";
+    const donutTitle = language === "en" ? "Pie chart" : "圓餅圖";
+    const rankTitle = language === "en" ? "Bar chart" : "長條圖";
+
+    return `<div class="expense-page-head"><h2>${language === "en" ? "Spending" : "記帳"}</h2><div class="expense-head-actions">${reportSettleButton}${reportAddButton}</div></div><div class="expense-report"><div class="expense-totals"></div><div class="expense-filter-bar"><div class="efilter-select-wrap"><select class="efilter-day" aria-label="天數"><option value="">${language === "en" ? "All Days" : "全部天數"}</option><option value="day-0">${language === "en" ? "Day 0 · Before trip" : "Day 0 · 行前"}</option>${trip.days.map((d, i) => `<option value="${escAttr(d.id)}">${language === "en" ? `Day ${i + 1}` : `第 ${i + 1} 天`}${d.date ? ` (${escAttr(d.date.slice(5))})` : ""}</option>`).join("")}</select></div><div class="efilter-select-wrap"><select class="efilter-cat" aria-label="類別"><option value="">${language === "en" ? "All Categories" : "所有類別"}</option>${expenseCategories.map(c => `<option value="${escAttr(c)}">${esc(c)}</option>`).join("")}</select></div>${membersActive.length > 1 ? `<div class="efilter-select-wrap"><select class="efilter-mem" aria-label="成員"><option value="">${language === "en" ? "All Travelers" : "所有成員"}</option>${membersActive.map(m => `<option value="${escAttr(m.id)}">${esc(m.name)}</option>`).join("")}</select></div>` : ""}</div><div class="expense-charts-block"><div class="chart-box cat-chart-box"><div class="chart-header chart-header-split"><strong>${catChartTitle}</strong><div class="chart-type-toggle" role="group" aria-label="${language === "en" ? "Chart type" : "圖表類型"}"><button type="button" class="chart-type-btn active" data-chart-type="donut" title="${donutTitle}" aria-label="${donutTitle}"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.21 15.89A10 10 0 1 1 8 2.83"/><path d="M22 12A10 10 0 0 0 12 2v10z"/></svg></button><button type="button" class="chart-type-btn" data-chart-type="rank" title="${rankTitle}" aria-label="${rankTitle}"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="15" y2="12"/><line x1="4" y1="18" x2="9" y2="18"/></svg></button></div></div><div class="donut-container"></div><div class="rank-bars-container" style="display:none"></div></div><div class="chart-box"><div class="chart-header"><strong>${dailyChartTitle}</strong></div><div class="daily-bars-container"></div></div></div><div class="expense-days-block"><div class="block-header"><strong>消費明細</strong><span class="block-sub">長按單筆可看各幣別換算</span></div><div class="days-container"></div></div></div>`;
   };
 
   const initialLanguage = trip.previewLanguage === "en" ? "en" : "zh";
@@ -661,14 +666,21 @@ export function buildMobileHtml(trip, mapAssets = {}) {
 .efilter-select-wrap select{height:34px!important;padding:5px 28px 5px 10px!important;font-size:13px!important;border-radius:10px!important}
 .chart-box{background:#ffffff;border:1px solid #e7d7c7;border-radius:15px;padding:14px 16px;box-shadow:0 1px 2px rgba(73,48,27,0.04);margin-bottom:10px}
 .chart-header{font-size:13px;font-weight:700;color:#352b23;margin-bottom:10px;padding-bottom:6px;border-bottom:1px solid #f0e6dd}
+.chart-header-split{display:flex;justify-content:space-between;align-items:center}
+.chart-type-toggle{display:inline-flex;align-items:center;background:#ffffff;border:1px solid #dec5ae;border-radius:7px;padding:1px;gap:2px}
+.chart-type-btn{display:inline-flex;align-items:center;justify-content:center;width:24px;height:22px;border:none;background:transparent;color:#8a715e;border-radius:5px;cursor:pointer;padding:0;-webkit-tap-highlight-color:transparent;transition:all .12s ease}
+.chart-type-btn:hover{color:#352b23}
+.chart-type-btn.active{background:#fdf2e9;color:#8a3d10;box-shadow:0 1px 2px rgba(138,61,16,0.12)}
+.chart-type-btn svg{display:block}
 .donut-flex{display:flex;align-items:center;gap:14px}
 .donut-svg-wrap{flex:none}
 .donut-legend{flex:1;display:flex;flex-direction:column;gap:5px}
-.donut-leg-item{display:grid;grid-template-columns:10px 1fr auto auto;align-items:center;gap:6px;font-size:11.5px}
-.donut-dot{width:8px;height:8px;border-radius:50%;display:inline-block}
+.donut-leg-item{display:flex;align-items:center;gap:6px;font-size:11.5px}
+.donut-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.donut-label-wrap{display:flex;align-items:baseline;gap:4px;flex:1 1 auto;min-width:0}
 .donut-label{color:#4d3b2b;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.donut-pct{color:#84715e;font-size:10.5px}
-.donut-amt{font-variant-numeric:tabular-nums;color:#352b23;font-size:11.5px}
+.donut-pct{color:#84715e;font-size:10.5px;flex-shrink:0}
+.donut-amt{font-variant-numeric:tabular-nums;color:#352b23;font-size:11.5px;margin-left:auto;flex-shrink:0;text-align:right}
 .rank-bars-list{display:flex;flex-direction:column;gap:8px}
 .rank-bar-row{display:grid;grid-template-columns:56px 1fr 64px;align-items:center;gap:8px;font-size:12px}
 .rank-name{color:#4d3b2b;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -704,14 +716,18 @@ export function buildMobileHtml(trip, mapAssets = {}) {
 .eday{background:#ffffff;border:1px solid #e7d7c7;border-radius:12px;margin-bottom:8px;overflow:hidden}
 .eday summary{padding:10px 12px;cursor:pointer;display:flex;justify-content:space-between;gap:8px;font-size:12.5px;color:#4d3b2b;background:#faf6f0;user-select:none}
 .eday summary b{color:#8a3d10;font-size:13px}
-.rrow{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:9px 12px;border-top:1px solid #f2eae1;cursor:pointer;-webkit-user-select:none;user-select:none}
+.rrow{display:flex;align-items:center;gap:10px;padding:9px 12px;border-top:1px solid #f2eae1;cursor:pointer;-webkit-user-select:none;user-select:none;position:relative}
 .rrow:active{background:#fdf9f4}
-.rrow-title{display:flex;align-items:center;gap:6px;font-size:13px;color:#352b23}
-.rrow-cat{font-size:10.5px;color:#7a6652;background:#f2eae1;padding:1px 6px;border-radius:4px}
+.rrow.is-dragging-expense,.is-dragging-item{opacity:0.88;transform:scale(1.02);box-shadow:0 8px 24px rgba(0,0,0,0.16);z-index:100;background:#fff;border-radius:8px}
+.rrow-cat{font-size:10.5px;color:#7a6652;background:#f2eae1;padding:4px 5px;border-radius:4px;flex-shrink:0;display:flex;flex-direction:column;align-items:center;justify-content:center;line-height:1.15;user-select:none;min-width:20px}
+.rrow-cat span{display:block}
+.rrow-left{flex:1 1 auto;min-width:0}
+.rrow-title{font-size:13px;color:#352b23;line-height:1.35;word-break:break-word;overflow-wrap:break-word}
+.rrow-title b{font-weight:600}
 .rrow-sub{font-size:11px;color:#84715e;margin-top:2px;display:block}
-.rrow-right{text-align:right}
-.rrow-primary{display:block;color:#8a3d10;font-size:12.5px;font-variant-numeric:tabular-nums}
-.rrow-hint{display:block;font-size:9.5px;color:#9a8a78}
+.rrow-right{flex-shrink:0;text-align:right;display:flex;flex-direction:column;align-items:flex-end;white-space:nowrap}
+.rrow-primary{display:block;color:#8a3d10;font-size:13px;font-weight:700;font-variant-numeric:tabular-nums;line-height:1.25}
+.rrow-sub-amt{display:block;font-size:11px;color:#7a6652;font-variant-numeric:tabular-nums;line-height:1.25;margin-top:1px}
 .expense-popover{position:fixed;z-index:9999;background:rgba(30,22,14,0.95);color:#fff;border:1px solid rgba(255,255,255,0.18);border-radius:12px;padding:12px 14px;box-shadow:0 12px 32px rgba(0,0,0,0.36);min-width:210px;max-width:280px;pointer-events:none;backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);animation:popFadeIn .12s ease-out}
 @keyframes popFadeIn{from{opacity:0;transform:scale(0.92)}to{opacity:1;transform:scale(1)}}
 .pop-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;border-bottom:1px solid rgba(255,255,255,0.14);padding-bottom:5px}
@@ -848,10 +864,10 @@ html[data-text-size="lg"] .transfer-amt{font-size:16.5px!important}
 html[data-text-size="lg"] .eday summary{font-size:15.5px!important;padding:12px 14px!important}
 html[data-text-size="lg"] .eday summary b{font-size:16px!important}
 html[data-text-size="lg"] .rrow-title{font-size:16px!important}
-html[data-text-size="lg"] .rrow-cat{font-size:13px!important;padding:2px 7px!important}
+html[data-text-size="lg"] .rrow-cat{font-size:13px!important;padding:4px 6px!important}
 html[data-text-size="lg"] .rrow-sub{font-size:13.5px!important}
 html[data-text-size="lg"] .rrow-primary{font-size:16px!important}
-html[data-text-size="lg"] .rrow-hint{font-size:11.5px!important}
+html[data-text-size="lg"] .rrow-sub-amt{font-size:13px!important}
 html[data-text-size="lg"] .expense-title h2{font-size:21px!important}
 html[data-text-size="lg"] .sec-label{font-size:14px!important}
 html[data-text-size="lg"] .expense-cat-btn,html[data-text-size="lg"] .expense-payer-btn,html[data-text-size="lg"] .participant-chip,html[data-text-size="lg"] .participant-all-toggle{font-size:15px!important;padding:6px 14px!important}
@@ -958,10 +974,10 @@ html[data-text-size="xl"] .transfer-amt{font-size:19.5px!important}
 html[data-text-size="xl"] .eday summary{font-size:18px!important;padding:14px 16px!important}
 html[data-text-size="xl"] .eday summary b{font-size:19px!important}
 html[data-text-size="xl"] .rrow-title{font-size:19px!important}
-html[data-text-size="xl"] .rrow-cat{font-size:15px!important;padding:3px 8px!important}
+html[data-text-size="xl"] .rrow-cat{font-size:15px!important;padding:5px 7px!important}
 html[data-text-size="xl"] .rrow-sub{font-size:15.5px!important}
 html[data-text-size="xl"] .rrow-primary{font-size:19px!important}
-html[data-text-size="xl"] .rrow-hint{font-size:13px!important}
+html[data-text-size="xl"] .rrow-sub-amt{font-size:15px!important}
 html[data-text-size="xl"] .expense-title h2{font-size:25px!important}
 html[data-text-size="xl"] .sec-label{font-size:16px!important}
 html[data-text-size="xl"] .expense-cat-btn,html[data-text-size="xl"] .expense-payer-btn,html[data-text-size="xl"] .participant-chip,html[data-text-size="xl"] .participant-all-toggle{font-size:17.5px!important;padding:8px 16px!important}
@@ -1821,7 +1837,6 @@ ${flightCss}</style>${appStyles}${style}<style>${itineraryLayoutCss}${mapGesture
   }
 
   function render() {
-    mountMobileShare();
     document.documentElement.lang = lang === "zh" ? "zh-Hant" : "en";
     bindPages();
     bindTransitModals();

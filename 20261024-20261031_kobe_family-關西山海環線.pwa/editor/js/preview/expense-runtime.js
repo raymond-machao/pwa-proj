@@ -8,7 +8,7 @@ export function expenseRuntimeScript({ homeCurrency, currencyRates, distinctCurr
   var MEMBERS = ${JSON.stringify(membersActive).replace(/<\//g, "<\\/>")};
   var CATS = ${JSON.stringify(expenseCategories.map(function(c) { return String(c); })).replace(/<\//g, "<\\/>")};
   var PALETTE = ${JSON.stringify(palette)};
-
+  var isEn = function() { return document.documentElement.lang === "en"; };
 
   function readExpenses() { return read(":expenses"); }
   function writeExpenses(v) {
@@ -50,7 +50,69 @@ export function expenseRuntimeScript({ homeCurrency, currencyRates, distinctCurr
   }
 
   var currentDisplayCur = CURRENCIES[0] || HOME;
+  var currentCatChartMode = (function() {
+    try { return localStorage.getItem("travel-cat-chart-mode") || "donut"; } catch(e) { return "donut"; }
+  })();
   var filterDay = "", filterCat = "", filterMem = "";
+
+  function updateCatChartVisibility() {
+    document.querySelectorAll(".cat-chart-box").forEach(function(box) {
+      var donut = box.querySelector(".donut-container");
+      var rank = box.querySelector(".rank-bars-container");
+      if (donut) donut.style.display = currentCatChartMode === "donut" ? "" : "none";
+      if (rank) rank.style.display = currentCatChartMode === "rank" ? "" : "none";
+      box.querySelectorAll(".chart-type-btn").forEach(function(btn) {
+        btn.classList.toggle("active", btn.getAttribute("data-chart-type") === currentCatChartMode);
+      });
+    });
+  }
+
+  function setCatChartMode(mode) {
+    currentCatChartMode = mode === "rank" ? "rank" : "donut";
+    try { localStorage.setItem("travel-cat-chart-mode", currentCatChartMode); } catch (e) {}
+    updateCatChartVisibility();
+  }
+
+  function bindCatChartLongPress() {
+    document.querySelectorAll(".cat-chart-box").forEach(function(box) {
+      if (box._lpBound) return;
+      box._lpBound = true;
+      var timer = null;
+      var startX = 0, startY = 0;
+      function cancel() {
+        if (timer) { clearTimeout(timer); timer = null; }
+      }
+      function onStart(e) {
+        if (e.target && e.target.closest && e.target.closest(".chart-type-btn")) return;
+        var pt = e.touches ? e.touches[0] : e;
+        if (!pt) return;
+        startX = pt.clientX;
+        startY = pt.clientY;
+        cancel();
+        timer = setTimeout(function() {
+          var nextMode = currentCatChartMode === "donut" ? "rank" : "donut";
+          setCatChartMode(nextMode);
+          timer = null;
+        }, 550);
+      }
+      function onMove(e) {
+        if (!timer) return;
+        var pt = e.touches ? e.touches[0] : e;
+        if (!pt) return;
+        if (Math.hypot(pt.clientX - startX, pt.clientY - startY) > 10) {
+          cancel();
+        }
+      }
+      box.addEventListener("touchstart", onStart, { passive: true });
+      box.addEventListener("touchmove", onMove, { passive: true });
+      box.addEventListener("touchend", cancel, { passive: true });
+      box.addEventListener("touchcancel", cancel, { passive: true });
+      box.addEventListener("mousedown", onStart);
+      box.addEventListener("mousemove", onMove);
+      box.addEventListener("mouseup", cancel);
+      box.addEventListener("mouseleave", cancel);
+    });
+  }
 
   function getFilteredRows() {
     return readExpenses().map(normExpense).filter(function(r) {
@@ -96,7 +158,7 @@ export function expenseRuntimeScript({ homeCurrency, currencyRates, distinctCurr
     var legendHtml = keys.map(function(k, idx) {
       var val = aggr[k], pct = Math.round((val / total) * 100);
       var color = PALETTE[idx % PALETTE.length];
-      return '<div class="donut-leg-item"><span class="donut-dot" style="background:' + color + '"></span><span class="donut-label">' + esc(k) + '</span><span class="donut-pct">' + pct + '%</span><b class="donut-amt">' + fmt(val) + '</b></div>';
+      return '<div class="donut-leg-item"><span class="donut-dot" style="background:' + color + '"></span><div class="donut-label-wrap"><span class="donut-label">' + esc(k) + '</span><span class="donut-pct">' + pct + '%</span></div><b class="donut-amt">' + fmt(val) + '</b></div>';
     }).join("");
 
     return '<div class="donut-flex"><div class="donut-svg-wrap"><svg width="140" height="140" viewBox="0 0 140 140">' + paths + '<text x="70" y="65" text-anchor="middle" font-size="11" fill="#7a6454">總計</text><text x="70" y="83" text-anchor="middle" font-size="14" font-weight="700" fill="#8a3d10">' + fmt(total) + '</text></svg></div><div class="donut-legend">' + legendHtml + '</div></div>';
@@ -193,13 +255,28 @@ export function expenseRuntimeScript({ homeCurrency, currencyRates, distinctCurr
       var total = 0; items.forEach(function(it) { total += effAmt(it); });
       var label = d.id === "day-0" ? "Day 0 · 行前支出" : ("Day " + idx + " · " + (d.date || "") + (d.title ? " " + d.title : ""));
       var rowsHtml = items.map(function(r) {
+        var isDiff = r.currency !== currentDisplayCur;
         var eqAmt = convertCurrency(r.amount + r.fee, r.currency, currentDisplayCur);
-        var subLine = esc(r.currency) + " " + fmt(r.amount + r.fee) + (r.currency !== currentDisplayCur ? ' (約 ' + esc(currentDisplayCur) + ' ' + fmt(eqAmt) + ')' : '');
-        return '<div class="rrow" data-id="' + esc(r.id) + '"><div class="rrow-left"><div class="rrow-title"><b>' + esc(r.description || r.category || "記帳") + '</b><span class="rrow-cat">' + esc(r.category || "其他") + '</span></div><small class="rrow-sub">' + (formatTime(r.time) ? esc(formatTime(r.time)) + ' · ' : '') + esc(payerOf(r)) + ' 墊付</small></div><div class="rrow-right"><b class="rrow-primary">' + subLine + '</b><span class="rrow-hint">點擊修改 · 長按換算</span></div></div>';
+        var primaryAmt = fmt(r.amount + r.fee) + " " + esc(r.currency);
+        var subAmt = isDiff ? ("(" + fmt(eqAmt) + " " + esc(currentDisplayCur) + ")") : "";
+        var catName = (r.category || "其他").slice(0, 4);
+        var catSpans = Array.from(catName).map(function(ch) { return "<span>" + esc(ch) + "</span>"; }).join("");
+        var catHtml = '<div class="rrow-cat">' + catSpans + '</div>';
+        var timeStr = d.id === "day-0" ? "" : (formatTime(r.time) ? esc(formatTime(r.time)) + " · " : "");
+        var leftHtml = '<div class="rrow-left"><div class="rrow-title"><b>' + esc(r.description || r.category || "記帳") + '</b></div><small class="rrow-sub">' + timeStr + esc(payerOf(r)) + (isEn() ? " paid" : " 墊付") + '</small></div>';
+        var rightHtml = '<div class="rrow-right"><b class="rrow-primary">' + primaryAmt + '</b>' + (subAmt ? '<span class="rrow-sub-amt">' + subAmt + '</span>' : '') + '</div>';
+        return '<div class="rrow" data-id="' + esc(r.id) + '">' + catHtml + leftHtml + rightHtml + '</div>';
       }).join("");
-      out += '<details class="eday" open><summary><span>' + esc(label) + '</span><b>合計 ' + fmt(total) + ' ' + esc(currentDisplayCur) + '</b></summary><div class="eday-items">' + rowsHtml + '</div></details>';
+      out += '<details class="eday" data-day-id="' + esc(d.id) + '" open><summary><span>' + esc(label) + '</span><b>合計 ' + fmt(total) + ' ' + esc(currentDisplayCur) + '</b></summary><div class="eday-items" data-day-id="' + esc(d.id) + '">' + rowsHtml + '</div></details>';
     });
     return out || '<p class="empty">尚無記帳資料</p>';
+  }
+
+  function canDragExpense() {
+    return document.documentElement.classList.contains("shared-editing") ||
+           Boolean(document.querySelector(".shared-editor-bar")) ||
+           Boolean(window.__travelPreviewEditing) ||
+           Boolean(window.top && window.top !== window);
   }
 
   var longPressTimer = null, activePopover = null, longPressFired = false;
@@ -228,6 +305,91 @@ export function expenseRuntimeScript({ homeCurrency, currencyRates, distinctCurr
     activePopover = pop;
   }
 
+  function startExpenseDrag(draggedEl, startX, startY) {
+    if (navigator.vibrate) try { navigator.vibrate(30); } catch(e) {}
+    draggedEl.classList.add("is-dragging-expense");
+
+    function onMove(e) {
+      if (e.cancelable) e.preventDefault();
+      var clientY = e.clientY || (e.touches && e.touches[0] ? e.touches[0].clientY : 0);
+      var clientX = e.clientX || (e.touches && e.touches[0] ? e.touches[0].clientX : 0);
+      if (!clientY) return;
+      var elUnder = document.elementFromPoint(clientX, clientY);
+      if (!elUnder) return;
+
+      var targetRow = elUnder.closest(".rrow");
+      if (targetRow && targetRow !== draggedEl) {
+        var rect = targetRow.getBoundingClientRect();
+        var midY = rect.top + rect.height / 2;
+        if (clientY < midY) {
+          targetRow.parentNode.insertBefore(draggedEl, targetRow);
+        } else {
+          targetRow.parentNode.insertBefore(draggedEl, targetRow.nextSibling);
+        }
+        return;
+      }
+
+      var targetItems = elUnder.closest(".eday-items");
+      if (targetItems && targetItems !== draggedEl.parentNode) {
+        targetItems.appendChild(draggedEl);
+        return;
+      }
+      var targetEday = elUnder.closest(".eday");
+      if (targetEday) {
+        var itemsBox = targetEday.querySelector(".eday-items");
+        if (itemsBox && itemsBox !== draggedEl.parentNode) {
+          itemsBox.appendChild(draggedEl);
+        }
+      }
+    }
+
+    function onEnd(e) {
+      document.removeEventListener("pointermove", onMove);
+      document.removeEventListener("pointerup", onEnd);
+      document.removeEventListener("pointercancel", onEnd);
+      document.removeEventListener("touchmove", onMove);
+      document.removeEventListener("touchend", onEnd);
+      document.removeEventListener("touchcancel", onEnd);
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onEnd);
+
+      draggedEl.classList.remove("is-dragging-expense");
+
+      var allRows = readExpenses().map(normExpense);
+      var rowMap = {};
+      allRows.forEach(function(r) { rowMap[r.id] = r; });
+
+      var newRows = [];
+      var edays = document.querySelectorAll(".eday");
+      edays.forEach(function(eday) {
+        var dayId = eday.getAttribute("data-day-id") || "day-0";
+        var rows = eday.querySelectorAll(".rrow");
+        rows.forEach(function(rEl) {
+          var rid = rEl.getAttribute("data-id");
+          if (rowMap[rid]) {
+            var rData = rowMap[rid];
+            rData.day = dayId;
+            newRows.push(rData);
+            delete rowMap[rid];
+          }
+        });
+      });
+      Object.keys(rowMap).forEach(function(k) { newRows.push(rowMap[k]); });
+
+      writeExpenses(newRows);
+      renderExpenseReport();
+    }
+
+    document.addEventListener("pointermove", onMove, { passive: false });
+    document.addEventListener("pointerup", onEnd);
+    document.addEventListener("pointercancel", onEnd);
+    document.addEventListener("touchmove", onMove, { passive: false });
+    document.addEventListener("touchend", onEnd);
+    document.addEventListener("touchcancel", onEnd);
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onEnd);
+  }
+
   function bindLongPressPopover() {
     var rrows = document.querySelectorAll(".rrow");
     var allRows = readExpenses().map(normExpense);
@@ -235,18 +397,62 @@ export function expenseRuntimeScript({ homeCurrency, currencyRates, distinctCurr
       var rid = el.getAttribute("data-id");
       var rowData = byId(allRows, rid);
       if (!rowData) return;
-      el.addEventListener("touchstart", function(e) {
+
+      var pressTimer = null, startX = 0, startY = 0;
+
+      function clearPress() {
+        if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
+      }
+
+      function onStart(e) {
+        clearPress();
         longPressFired = false;
-        longPressTimer = setTimeout(function() { longPressFired = true; showPopover(rowData, el); }, 280);
-      }, { passive: true });
-      el.addEventListener("touchend", removePopover, { passive: true });
-      el.addEventListener("touchcancel", removePopover, { passive: true });
-      el.addEventListener("mousedown", function(e) {
-        longPressFired = false;
-        longPressTimer = setTimeout(function() { longPressFired = true; showPopover(rowData, el); }, 280);
-      });
-      el.addEventListener("mouseup", removePopover);
-      el.addEventListener("mouseleave", removePopover);
+        startX = e.clientX || (e.touches && e.touches[0] ? e.touches[0].clientX : 0);
+        startY = e.clientY || (e.touches && e.touches[0] ? e.touches[0].clientY : 0);
+        var isDrag = canDragExpense();
+        var delay = isDrag ? 320 : 280;
+
+        pressTimer = setTimeout(function() {
+          longPressFired = true;
+          if (isDrag) {
+            startExpenseDrag(el, startX, startY);
+          } else {
+            showPopover(rowData, el);
+          }
+        }, delay);
+      }
+
+      function onMove(e) {
+        if (!pressTimer) return;
+        var cx = e.clientX || (e.touches && e.touches[0] ? e.touches[0].clientX : 0);
+        var cy = e.clientY || (e.touches && e.touches[0] ? e.touches[0].clientY : 0);
+        if (Math.hypot(cx - startX, cy - startY) > 8) {
+          clearPress();
+        }
+      }
+
+      function onFinish() {
+        clearPress();
+        if (!canDragExpense()) {
+          removePopover();
+        }
+      }
+
+      if (window.PointerEvent) {
+        el.addEventListener("pointerdown", onStart);
+        el.addEventListener("pointermove", onMove);
+        el.addEventListener("pointerup", onFinish);
+        el.addEventListener("pointercancel", onFinish);
+      } else {
+        el.addEventListener("touchstart", onStart, { passive: true });
+        el.addEventListener("touchmove", onMove, { passive: true });
+        el.addEventListener("touchend", onFinish, { passive: true });
+        el.addEventListener("touchcancel", onFinish, { passive: true });
+        el.addEventListener("mousedown", onStart);
+        el.addEventListener("mousemove", onMove);
+        el.addEventListener("mouseup", onFinish);
+        el.addEventListener("mouseleave", onFinish);
+      }
     });
   }
 
@@ -274,6 +480,8 @@ export function expenseRuntimeScript({ homeCurrency, currencyRates, distinctCurr
       settleEl.innerHTML = renderSettlement(rows);
     });
 
+    updateCatChartVisibility();
+    bindCatChartLongPress();
     bindLongPressPopover();
   }
 
@@ -320,13 +528,27 @@ export function expenseRuntimeScript({ homeCurrency, currencyRates, distinctCurr
     var delBtn = form.querySelector(".expense-delete-btn");
     var recIdInput = form.querySelector(".expense-record-id");
 
+    function updateModalDayTimeDisplay() {
+      var daySel = form.querySelector(".expense-day");
+      var timeSec = form.querySelector(".form-section-time");
+      var timeInp = form.querySelector(".expense-time");
+      if (!daySel || !timeSec || !timeInp) return;
+      var isDay0 = daySel.value === "day-0";
+      timeSec.style.display = isDay0 ? "none" : "";
+      if (isDay0) {
+        timeInp.value = "00:00";
+      } else if (timeInp.value === "00:00" || !timeInp.value) {
+        timeInp.value = nowTime();
+      }
+    }
+
     if (editRecordId) {
       var allRows = readExpenses().map(normExpense);
       var rec = byId(allRows, editRecordId);
       if (!rec) return;
 
-      if (titleEl) titleEl.textContent = (lang === "en" ? "Edit expense" : "編輯記帳");
-      if (saveBtn) saveBtn.textContent = (lang === "en" ? "Update" : "儲存修改");
+      if (titleEl) titleEl.textContent = (isEn() ? "Edit expense" : "編輯記帳");
+      if (saveBtn) saveBtn.textContent = (isEn() ? "Update" : "儲存修改");
       if (delBtn) delBtn.style.display = "block";
       if (recIdInput) recIdInput.value = rec.id;
 
@@ -378,8 +600,8 @@ export function expenseRuntimeScript({ homeCurrency, currencyRates, distinctCurr
         allT.classList.toggle("active", allActive);
       }
     } else {
-      if (titleEl) titleEl.textContent = (lang === "en" ? "Add expense" : "記一筆");
-      if (saveBtn) saveBtn.textContent = (lang === "en" ? "Save" : "儲存記帳");
+      if (titleEl) titleEl.textContent = (isEn() ? "Add expense" : "記一筆");
+      if (saveBtn) saveBtn.textContent = (isEn() ? "Save" : "儲存記帳");
       if (delBtn) delBtn.style.display = "none";
       if (recIdInput) recIdInput.value = "";
 
@@ -403,6 +625,11 @@ export function expenseRuntimeScript({ homeCurrency, currencyRates, distinctCurr
       var firstVal = form.querySelector('.currency-val[data-code="' + CURRENCIES[0] + '"]') || form.querySelector('.currency-val');
       if (firstVal) setTimeout(function() { firstVal.focus(); }, 120);
     }
+    var daySelectEl = form.querySelector(".expense-day");
+    if (daySelectEl) {
+      daySelectEl.onchange = updateModalDayTimeDisplay;
+    }
+    updateModalDayTimeDisplay();
   }
 
   function closeExpenseModal() {
@@ -427,7 +654,10 @@ export function expenseRuntimeScript({ homeCurrency, currencyRates, distinctCurr
     var cat = form.querySelector(".expense-category") ? form.querySelector(".expense-category").value : "其他";
     var desc = (form.querySelector(".expense-description") ? form.querySelector(".expense-description").value.trim() : "") || cat;
     var day = form.querySelector(".expense-day") ? form.querySelector(".expense-day").value : "day-0";
-    var time = form.querySelector(".expense-time") ? (formatTime(form.querySelector(".expense-time").value) || nowTime()) : nowTime();
+    var time = "00:00";
+    if (day !== "day-0") {
+      time = form.querySelector(".expense-time") ? (formatTime(form.querySelector(".expense-time").value) || nowTime()) : nowTime();
+    }
     var payerId = form.querySelector(".expense-payer-id") ? form.querySelector(".expense-payer-id").value : (form.querySelector(".expense-payer") ? form.querySelector(".expense-payer").value : "");
     var partIds = [];
     form.querySelectorAll(".participant-chip.active").forEach(function(c) {
@@ -536,6 +766,13 @@ export function expenseRuntimeScript({ homeCurrency, currencyRates, distinctCurr
       if (curPill) {
         currentDisplayCur = curPill.getAttribute("data-cur") || HOME;
         renderExpenseReport();
+        return;
+      }
+
+      var chartBtn = ev.target && ev.target.closest ? ev.target.closest(".chart-type-btn") : null;
+      if (chartBtn) {
+        var mode = chartBtn.getAttribute("data-chart-type");
+        setCatChartMode(mode);
         return;
       }
 

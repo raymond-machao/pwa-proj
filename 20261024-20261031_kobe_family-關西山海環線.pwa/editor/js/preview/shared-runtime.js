@@ -107,29 +107,134 @@ export async function installSharedRuntime(config) {
     if(fontButton){let stack=fontButton.closest('.hero-tool-stack');if(!stack){stack=document.createElement('div');stack.className='hero-tool-stack';fontButton.replaceWith(stack);stack.append(fontButton);}stack.append(bar);}
     for(const page of document.querySelectorAll('.feature-page')) {
       const add=(label,action)=>{const b=document.createElement('div');b.className='shared-actions shared-page-add';b.append(button('add',label,action));page.prepend(b);};
-      if(page.id.startsWith('notes')) {add('新增注意事項',()=>editNote());for(const row of trip.notes||[])actions(page.querySelector('[data-shared-note="'+CSS.escape(row.id)+'"] .note-stop-text .stop-top'),row,trip.notes,editNote);}
-      if(page.id.startsWith('references')) {add('新增口袋名單',()=>editReference());for(const row of trip.references||[])actions(page.querySelector('[data-shared-reference="'+CSS.escape(row.id)+'"] .stop-top'),row,trip.references,editReference);}
+      if(page.id.startsWith('notes')) {add('新增注意事項',()=>editNote());for(const row of trip.notes||[])actions(page.querySelector('[data-shared-note="'+CSS.escape(row.id)+'"] .note-stop-text .stop-top'),row,trip.notes,editNote,true);}
+      if(page.id.startsWith('references')) {add('新增口袋名單',()=>editReference());for(const row of trip.references||[])actions(page.querySelector('[data-shared-reference="'+CSS.escape(row.id)+'"] .stop-top'),row,trip.references,editReference,true);}
       if(page.id.startsWith('packing')) {
         add('新增清單分類',()=>editGroup());
         for(const [index,g] of (trip.packingGroups||[]).entries()) {
           const card=page.querySelector('[id^="pack-group-'+(index+1)+'-"]');if(!card)continue;
-          actions(card.querySelector('.day-head'),g,trip.packingGroups,editGroup);
+          actions(card.querySelector('.day-head'),g,trip.packingGroups,editGroup,true);
           const row=document.createElement('div');row.className='shared-actions shared-add-actions';row.append(button('add','新增準備項目',()=>editPacking(g)));card.append(row);
-          for(const i of g.items||[])actions(page.querySelector('[data-pack-id="'+CSS.escape(i.id)+'"]')?.closest('label'),i,g.items,r=>editPacking(g,r));
+          for(const i of g.items||[])actions(page.querySelector('[data-pack-id="'+CSS.escape(i.id)+'"]')?.closest('label'),i,g.items,r=>editPacking(g,r),true);
         }
       }
       if(page.id.startsWith('itinerary')) {
         // Keep the day/map region fixed; add buttons live inside each card.
         for(const [index,d] of trip.days.entries()) {
           const card=page.querySelector('[id^="day-'+(index+1)+'-"]');if(!card)continue;
-          const head=card.querySelector('.day-head'); actions(head,d,trip.days,editDay);
+          const head=card.querySelector('.day-head'); actions(head,d,trip.days,editDay,true);
           const row=document.createElement('div');row.className='shared-actions shared-add-actions';row.append(button('addStop','新增行程地點',()=>editStop(d)),button('addDay','新增日期',()=>editDay()));head?.append(row);
           for(const s of d.stops)actions(page.querySelector('[id="preview-stop-'+CSS.escape(s.id)+'"] .place-title-wrap')||page.querySelector('[id="preview-stop-'+CSS.escape(s.id)+'"] .flight-airport>span')||page.querySelector('[id="preview-stop-'+CSS.escape(s.id)+'"] .stop-top')||page.querySelector('[id="preview-stop-'+CSS.escape(s.id)+'"] .flight-airport'),s,d.stops,r=>editStop(d,r),true);
         }
         if(!trip.days.length)add('新增日期',()=>editDay());
       }
     }
+    bindSharedDrag();
     window.syncTravelLayout?.();
+  }
+
+  function bindSharedDrag() {
+    if(!token) return;
+    const items = document.querySelectorAll('[data-shared-note], [data-shared-reference], .pack-item, article.stop[id^="preview-stop-"]');
+    items.forEach(el => {
+      let timer = null, startX = 0, startY = 0, dragging = false;
+      const onPointerDown = e => {
+        if (e.target.closest('button, a, input, select, textarea, .shared-actions')) return;
+        startX = e.clientX; startY = e.clientY;
+        dragging = false;
+        timer = setTimeout(() => {
+          dragging = true;
+          startSharedDrag(el);
+        }, 350);
+      };
+      const onPointerMove = e => {
+        if (!dragging && (Math.hypot(e.clientX - startX, e.clientY - startY) > 8)) {
+          clearTimeout(timer);
+        }
+      };
+      const onPointerEnd = () => clearTimeout(timer);
+      el.addEventListener('pointerdown', onPointerDown);
+      el.addEventListener('pointermove', onPointerMove);
+      el.addEventListener('pointerup', onPointerEnd);
+      el.addEventListener('pointercancel', onPointerEnd);
+    });
+  }
+
+  function startSharedDrag(draggedEl) {
+    if (navigator.vibrate) try { navigator.vibrate(30); } catch {}
+    draggedEl.classList.add('is-dragging-item');
+    const parentContainer = draggedEl.parentNode;
+
+    function onMove(e) {
+      if (e.cancelable) e.preventDefault();
+      const clientY = e.clientY || (e.touches && e.touches[0] ? e.touches[0].clientY : 0);
+      const clientX = e.clientX || (e.touches && e.touches[0] ? e.touches[0].clientX : 0);
+      if (!clientY) return;
+      const elUnder = document.elementFromPoint(clientX, clientY);
+      if (!elUnder) return;
+
+      const target = elUnder.closest('[data-shared-note], [data-shared-reference], .pack-item, article.stop[id^="preview-stop-"]');
+      if (target && target !== draggedEl && target.parentNode === parentContainer) {
+        const rect = target.getBoundingClientRect();
+        const midY = rect.top + rect.height / 2;
+        if (clientY < midY) {
+          parentContainer.insertBefore(draggedEl, target);
+        } else {
+          parentContainer.insertBefore(draggedEl, target.nextSibling);
+        }
+      }
+    }
+
+    function onEnd() {
+      document.removeEventListener('pointermove', onMove);
+      document.removeEventListener('pointerup', onEnd);
+      document.removeEventListener('pointercancel', onEnd);
+      document.removeEventListener('touchmove', onMove);
+      document.removeEventListener('touchend', onEnd);
+      document.removeEventListener('touchcancel', onEnd);
+
+      draggedEl.classList.remove('is-dragging-item');
+
+      capture();
+      if (draggedEl.hasAttribute('data-shared-note')) {
+        const noteIds = [...parentContainer.querySelectorAll('[data-shared-note]')].map(n => n.getAttribute('data-shared-note'));
+        trip.notes.sort((a, b) => noteIds.indexOf(a.id) - noteIds.indexOf(b.id));
+        changed();
+      } else if (draggedEl.hasAttribute('data-shared-reference')) {
+        const refIds = [...parentContainer.querySelectorAll('[data-shared-reference]')].map(r => r.getAttribute('data-shared-reference'));
+        const currentRefMap = new Map(trip.references.map(r => [r.id, r]));
+        const sortedSubset = refIds.map(id => currentRefMap.get(id)).filter(Boolean);
+        let subIdx = 0;
+        trip.references = trip.references.map(r => refIds.includes(r.id) ? sortedSubset[subIdx++] : r);
+        changed();
+      } else if (draggedEl.classList.contains('pack-item')) {
+        const itemIds = [...parentContainer.querySelectorAll('[data-pack-id]')].map(i => i.getAttribute('data-pack-id'));
+        for (const g of trip.packingGroups || []) {
+          if (g.items?.some(it => itemIds.includes(it.id))) {
+            g.items.sort((a, b) => itemIds.indexOf(a.id) - itemIds.indexOf(b.id));
+            break;
+          }
+        }
+        changed();
+      } else if (draggedEl.id?.startsWith('preview-stop-')) {
+        const stopIds = [...parentContainer.querySelectorAll('article.stop[id^="preview-stop-"]')].map(s => s.id.replace('preview-stop-', ''));
+        for (const d of trip.days || []) {
+          if (d.stops?.some(s => stopIds.includes(s.id))) {
+            d.stops.sort((a, b) => stopIds.indexOf(a.id) - stopIds.indexOf(b.id));
+            invalidateRoutes(d.stops);
+            break;
+          }
+        }
+        changed();
+      }
+    }
+
+    document.addEventListener('pointermove', onMove, { passive: false });
+    document.addEventListener('pointerup', onEnd);
+    document.addEventListener('pointercancel', onEnd);
+    document.addEventListener('touchmove', onMove, { passive: false });
+    document.addEventListener('touchend', onEnd);
+    document.addEventListener('touchcancel', onEnd);
   }
   async function redraw() {
     const { buildMobileHtml }=await import('../exporter.js');
