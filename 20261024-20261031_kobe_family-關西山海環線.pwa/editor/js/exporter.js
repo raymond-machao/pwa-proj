@@ -568,6 +568,7 @@ export function buildMobileHtml(trip, mapAssets = {}) {
 .leg-rest,.leg-plan,.flight-duration,.transit-modal-body .leg-step{color:#352b23!important}
 .feature-nav{position:fixed;left:0;right:0;bottom:0;margin:0 auto;z-index:40;display:flex;align-items:center;justify-content:space-around;width:100%;max-width:720px;height:calc(50px + var(--safe-bottom));border-top:1px solid #ead8c9;background:rgba(255,255,255,.98);box-shadow:0 -3px 12px rgba(73,48,27,.07);padding:0 4px var(--safe-bottom);box-sizing:border-box}
 .feature-nav .nav-btn-tab{flex:1 1 0;min-width:0;max-width:85px;height:100%;border:0;background:none;color:#7b6754;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:2px 2px;cursor:pointer;border-radius:10px;-webkit-tap-highlight-color:transparent;transition:all .15s ease}
+.feature-nav .nav-btn-tab:active{transform:scale(0.92)}
 .feature-nav .nav-btn-tab .nav-icon{display:inline-flex;align-items:center;justify-content:center;height:20px;margin-bottom:2px}
 .feature-nav .nav-btn-tab .nav-icon svg{display:block}
 .feature-nav .nav-btn-tab .nav-text{font-size:10.5px;font-weight:600;line-height:1.1;display:block;white-space:nowrap;letter-spacing:-0.2px}
