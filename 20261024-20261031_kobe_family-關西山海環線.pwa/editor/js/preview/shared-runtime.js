@@ -26,8 +26,9 @@ export async function installSharedRuntime(config) {
   let reading=false,deferredSha=null,lastReadError='';
   if(preview)token=window.__travelPreviewEditing?"preview":"";
   if(!preview)try {
+    const isEditing = localStorage.getItem(key + ':editing') === '1';
     const exited = sessionStorage.getItem(key + ':exited') === '1';
-    token = exited ? '' : (localStorage.getItem(tokenKey) || '');
+    token = (isEditing && !exited) ? (localStorage.getItem(tokenKey) || '') : '';
     legacyDraft=JSON.parse(localStorage.getItem(key+':legacy')||'null');if(legacyDraft?.base?.tripId!==seed.tripId)legacyDraft=null;
     const saved = JSON.parse(localStorage.getItem(key) || 'null');
     if (saved?.base?.tripId === seed.tripId && saved?.trip?.tripId === seed.tripId) { base = saved.base; trip = saved.trip; dirty = Boolean(saved.dirty); savedShared = true; }
@@ -77,7 +78,6 @@ export async function installSharedRuntime(config) {
     bar.append(button('edit',en()?'Edit':'編輯',()=>edit(row)),button('delete',en()?'Delete':'刪除',()=>{
       if(confirm(en()?'Delete this item?':'確定刪除這個項目？')) { capture();list.splice(list.indexOf(row),1);if(move)invalidateRoutes(list);if(list===trip.days){trip.startDate=trip.days.map(d=>d.date).filter(Boolean).sort()[0]||'';trip.endDate=trip.days.map(d=>d.date).filter(Boolean).sort().at(-1)||'';for(const e of trip.previewState?.expenses||[])if(e.day===row.id)e.day='day-0';}changed(); }
     }));
-    if(move) for(const [kind,offset] of [['up',-1],['down',1]]) bar.append(button(kind,kind==='up'?'往前移':'往後移',()=>{capture();const i=list.indexOf(row),j=i+offset;if(j>=0&&j<list.length){[list[i],list[j]]=[list[j],list[i]];invalidateRoutes(list);changed();}}));
     host.append(bar);
   }
   function capture() {
@@ -85,10 +85,10 @@ export async function installSharedRuntime(config) {
     if(state) { trip.previewState=state;for(const g of trip.packingGroups||[])for(const i of g.items||[])if(i.id in state.packing)i.checked=state.packing[i.id]; }
   }
   function guardReadonly() {
-    window.__travelSharedReadonly=!token&&!preview;
+    window.__travelSharedReadonly=false;
     document.documentElement.classList.toggle('shared-editing',Boolean(token));
-    document.querySelectorAll('[data-pack-id]').forEach(b=>b.disabled=busy||(!token&&!preview));
-    document.querySelectorAll('.day-expense').forEach(b=>b.hidden=!token&&!preview);
+    document.querySelectorAll('[data-pack-id]').forEach(b=>b.disabled=busy);
+    document.querySelectorAll('.day-expense').forEach(b=>b.hidden=false);
   }
   function controls() {
     document.querySelectorAll('.shared-actions,.shared-editor-bar,.shared-warning').forEach(n=>n.remove());
@@ -98,7 +98,7 @@ export async function installSharedRuntime(config) {
     if(stale && seed.settings?.showMap!==false) {
       const warning=document.createElement('p');warning.className='shared-warning';warning.textContent=en()?'Itinerary changed. Republish maps from the desktop; navigation links remain available.':'行程地點或順序已變更，地圖須由電腦重新發布；仍可使用外部導航。';document.querySelector('.hero')?.append(warning);
     }
-    function exitEditing() { token = ''; try { sessionStorage.setItem(key + ':exited', '1'); } catch {} notifyPreview(false); controls(); message(en() ? 'Exited editing mode' : '已結束編輯模式'); }
+    function exitEditing() { token = ''; try { localStorage.setItem(key + ':editing', '0'); sessionStorage.setItem(key + ':exited', '1'); } catch {} notifyPreview(false); controls(); message(en() ? 'Exited editing mode' : '已結束編輯模式'); }
     if(!token){window.syncTravelLayout?.();return;}
     const bar=document.createElement('div');bar.className='shared-editor-bar';
     bar.append(button('save',preview?(en()?'Save project':'儲存專案'):(en()?'Save shared trip':'儲存共享旅程'),save));bar.firstChild.classList.toggle('shared-dirty',dirty);
@@ -337,9 +337,9 @@ export async function installSharedRuntime(config) {
     document.body.append(d);d.showModal();d.onclose=()=>{d.querySelector('[name=token]').value='';d.remove();};
     d.querySelector('[data-close]').onclick=d.querySelector('[data-cancel]').onclick=()=>d.close();
     d.querySelector('[data-remove]').onclick=()=>{exitEditing();d.close();};
-    const forgetBtn=d.querySelector('[data-forget]');if(forgetBtn)forgetBtn.onclick=()=>{try{localStorage.removeItem(tokenKey);}catch{}exitEditing();d.close();message(text('已清除本機記住的授權','Remembered token cleared'));};
-    d.querySelector('form').onsubmit=async e=>{e.preventDefault();const f=e.target;if(preview){token='preview';try{sessionStorage.removeItem(key+':exited');}catch{}controls();notifyPreview(false);d.close();return;}const entered=(f.elements.token.value.trim()||remembered),b=f.querySelector('[type=submit]');if(!entered){f.querySelector('[role=status]').textContent=text('請先輸入 GitHub Token。','Enter your GitHub token first.');f.elements.token.focus();return;}b.disabled=true;
-      try{const response=await fetch('https://api.github.com/repos/'+config.repository,{headers:{Authorization:'Bearer '+entered,Accept:'application/vnd.github+json'},cache:'no-store',redirect:'error',signal:AbortSignal.timeout(25000)});if(!response.ok)throw Error('Token 驗證失敗，請檢查授權。');const repo=await response.json();if(!repo.permissions?.push)throw Error('這份授權沒有儲存庫寫入資格。');token=entered;try{sessionStorage.removeItem(key+':exited');}catch{}try{if(f.elements.remember.checked)localStorage.setItem(tokenKey,token);else localStorage.removeItem(tokenKey);}catch{message('授權只暫留於此頁，裝置無法記住 Token。');}f.elements.token.value='';d.close();if(legacyDraft&&!dirty){base=copy(legacyDraft.base);trip=mergeShared(legacyDraft.base,legacyDraft.trip,trip).trip;dirty=true;persist();await redraw();}controls();await refresh(true);}catch(e){f.querySelector('[role=status]').textContent=e.message;}finally{b.disabled=false;}};
+    const forgetBtn=d.querySelector('[data-forget]');if(forgetBtn)forgetBtn.onclick=()=>{try{localStorage.removeItem(tokenKey);localStorage.setItem(key+':editing','0');}catch{}exitEditing();d.close();message(text('已清除本機記住的授權','Remembered token cleared'));};
+    d.querySelector('form').onsubmit=async e=>{e.preventDefault();const f=e.target;if(preview){token='preview';try{localStorage.setItem(key+':editing','1');sessionStorage.removeItem(key+':exited');}catch{}controls();notifyPreview(false);d.close();return;}const entered=(f.elements.token.value.trim()||remembered),b=f.querySelector('[type=submit]');if(!entered){f.querySelector('[role=status]').textContent=text('請先輸入 GitHub Token。','Enter your GitHub token first.');f.elements.token.focus();return;}b.disabled=true;
+      try{const response=await fetch('https://api.github.com/repos/'+config.repository,{headers:{Authorization:'Bearer '+entered,Accept:'application/vnd.github+json'},cache:'no-store',redirect:'error',signal:AbortSignal.timeout(25000)});if(!response.ok)throw Error('Token 驗證失敗，請檢查授權。');const repo=await response.json();if(!repo.permissions?.push)throw Error('這份授權沒有儲存庫寫入資格。');token=entered;try{localStorage.setItem(key+':editing','1');sessionStorage.removeItem(key+':exited');}catch{}try{if(f.elements.remember.checked)localStorage.setItem(tokenKey,token);else localStorage.removeItem(tokenKey);}catch{message('授權只暫留於此頁，裝置無法記住 Token。');}f.elements.token.value='';d.close();if(legacyDraft&&!dirty){base=copy(legacyDraft.base);trip=mergeShared(legacyDraft.base,legacyDraft.trip,trip).trip;dirty=true;persist();await redraw();}controls();await refresh(true);}catch(e){f.querySelector('[role=status]').textContent=e.message;}finally{b.disabled=false;}};
   }
   let taps=0,lastTap=0,lastTarget='';
   document.addEventListener('click',e=>{
@@ -350,7 +350,7 @@ export async function installSharedRuntime(config) {
     const now=Date.now();taps=target===lastTarget&&now-lastTap<1500?taps+1:1;lastTarget=target;lastTap=now;
     if(taps===5){taps=0;authorization();}
   },true);
-  document.addEventListener('click',e=>{if(((!token&&!preview)||busy)&&e.target.closest('.day-expense,.rrow,.expense-delete-btn,[data-pack-id]')){e.preventDefault();e.stopImmediatePropagation();}},true);
+  document.addEventListener('click',e=>{if(busy&&e.target.closest('.day-expense,.rrow,.expense-delete-btn,[data-pack-id]')){e.preventDefault();e.stopImmediatePropagation();}},true);
   window.addEventListener('travel-preview-change',()=>{if(!token&&!preview)return;capture();dirty=true;persist();controls();});
   window.addEventListener('online',()=>refresh(true));document.addEventListener('visibilitychange',()=>refresh());window.addEventListener('focus',()=>refresh());
   window.addEventListener('beforeunload',e=>{if(dirty&&!preview){e.preventDefault();e.returnValue='';}});
