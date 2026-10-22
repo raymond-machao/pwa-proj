@@ -1,4 +1,4 @@
-import {referenceCategory, referenceSuggestions} from '../domain/reference-categories.js';
+import {referenceCategory, referenceSuggestions, categoryDisplayText} from '../domain/reference-categories.js';
 import {readAttachment} from '../domain/attachments.js';
 import { assertShared, createSharedClient, sharedProject, mapSignature, mergeShared } from '../domain/shared-trip.js';
 import { resolveSharedMerge } from '../ui/shared-conflicts.js';
@@ -256,7 +256,7 @@ export async function installSharedRuntime(config) {
     const f=document.createElement('form');dialog.append(f);const inputs={};
     for(const [name,label,type='text',options] of fields) {
       const l=document.createElement('label');l.append(document.createTextNode(t(label)));const input=document.createElement(type==='textarea'?'textarea':type==='select'?'select':'input');
-      if(type==='combobox'){input.type='text';const list=document.createElement('datalist');list.id='shared-options-'+name;for(const value of options){const option=document.createElement('option');option.value=value;list.append(option);}input.setAttribute('list',list.id);f.append(list);}else if(type==='select')for(const [value,text] of options){const o=document.createElement('option');o.value=value;o.textContent=t(text);input.append(o);}else if(type!=='textarea')input.type=type;
+      if(type==='combobox'){input.type='text';const list=document.createElement('datalist');list.id='shared-options-'+name;for(const value of options){const option=document.createElement('option');option.value=value;option.label=categoryDisplayText(value);list.append(option);}input.setAttribute('list',list.id);f.append(list);}else if(type==='select')for(const [value,text] of options){const o=document.createElement('option');o.value=value;o.textContent=t(text);input.append(o);}else if(type!=='textarea')input.type=type;
       if(type==='select'&&initial[name]&&!Array.from(input.options).some(o=>o.value===String(initial[name]))){const old=document.createElement('option');old.value=String(initial[name]);old.textContent=String(initial[name]);input.append(old);}input.name=name;input.value=initial[name]??'';if(name==='content')input.placeholder=t('內容（支援 [文字](網址) 或直接貼網址）');if(name==='note')input.placeholder=t('備註（支援 [文字](網址) 或直接貼網址）');if(type==='combobox')input.placeholder=en()?'Choose or enter a category':'選擇或輸入分類';if(name==='quantity'){input.min='1';input.step='1';input.inputMode='numeric';}if(type==='url')input.pattern='https?://.*';l.append(input);f.append(l);inputs[name]=input;
     }
     let file=null, removeAttachment=false;
