@@ -2,6 +2,7 @@ import {referenceCategory, referenceSuggestions, categoryDisplayText} from '../d
 import {readAttachment} from '../domain/attachments.js';
 import { assertShared, createSharedClient, sharedProject, mapSignature, mergeShared } from '../domain/shared-trip.js';
 import { resolveSharedMerge } from '../ui/shared-conflicts.js';
+import { bindCategoryCombobox } from '../ui/category-combobox.js';
 import { newDay, newStop, newNote, newReference, newPackingGroup, newPackingItem } from '../domain/trip-defaults.js';
 
 // PWA uses on-device credentials. Desktop preview uses memory only, with no GitHub requests.
@@ -253,10 +254,10 @@ export async function installSharedRuntime(config) {
   async function changed() { dirty=true;persist();setBusy(true);try{await redraw();const applied=await notifyPreview(true);if(preview&&!applied){message(en()?'Preview draft kept; desktop changes were not applied.':'預覽草稿仍保留，尚未套用到左側。');return;}message(preview?(en()?'Preview changes are in desktop memory. Save the project explicitly.':'預覽修改已同步到左側，按外側「儲存專案」才會寫檔。'):(en()?'Changes saved on this device. Tap Save to share.':'變更已暫存於此裝置，按「儲存共享旅程」才會同步。'));}catch(e){message('草稿已保留，畫面更新失敗：'+e.message);}finally{setBusy(false);} }
   function form(title, fields, initial, submit, attachment=false) {
     const dialog=document.createElement('dialog');dialog.className='shared-dialog';const h=document.createElement('h2');h.textContent=t(title);dialog.append(h);
-    const f=document.createElement('form');dialog.append(f);const inputs={};
+    const f=document.createElement('form');dialog.append(f);const inputs={};const comboboxBindings=[];
     for(const [name,label,type='text',options] of fields) {
       const l=document.createElement('label');l.append(document.createTextNode(t(label)));const input=document.createElement(type==='textarea'?'textarea':type==='select'?'select':'input');
-      if(type==='combobox'){input.type='text';const list=document.createElement('datalist');list.id='shared-options-'+name;for(const value of options){const option=document.createElement('option');option.value=value;option.label=categoryDisplayText(value);list.append(option);}input.setAttribute('list',list.id);f.append(list);}else if(type==='select')for(const [value,text] of options){const o=document.createElement('option');o.value=value;o.textContent=t(text);input.append(o);}else if(type!=='textarea')input.type=type;
+      if(type==='combobox'){input.type='text';const list=document.createElement('datalist');list.id='shared-options-'+name;for(const value of options){const option=document.createElement('option');option.value=value;option.label=categoryDisplayText(value);list.append(option);}f.append(list);comboboxBindings.push(()=>bindCategoryCombobox(input,options,{formatLabel:v=>categoryDisplayText(v,en()?'en':'zh')}));}else if(type==='select')for(const [value,text] of options){const o=document.createElement('option');o.value=value;o.textContent=t(text);input.append(o);}else if(type!=='textarea')input.type=type;
       if(type==='select'&&initial[name]&&!Array.from(input.options).some(o=>o.value===String(initial[name]))){const old=document.createElement('option');old.value=String(initial[name]);old.textContent=String(initial[name]);input.append(old);}input.name=name;input.value=initial[name]??'';if(name==='content')input.placeholder=t('內容（支援 [文字](網址) 或直接貼網址）');if(name==='note')input.placeholder=t('備註（支援 [文字](網址) 或直接貼網址）');if(type==='combobox')input.placeholder=en()?'Choose or enter a category':'選擇或輸入分類';if(name==='quantity'){input.min='1';input.step='1';input.inputMode='numeric';}if(type==='url')input.pattern='https?://.*';l.append(input);f.append(l);inputs[name]=input;
     }
     let file=null, removeAttachment=false;
@@ -273,7 +274,7 @@ export async function installSharedRuntime(config) {
     const cancel=document.createElement('button');cancel.type='button';cancel.textContent=t('取消');cancel.onclick=()=>{dialog.close();dialog.remove();};
     const ok=document.createElement('button');ok.type='submit';ok.textContent=t('完成');const footer=document.createElement('div');footer.className='shared-form-actions';footer.append(cancel,ok);f.append(footer);
     f.onsubmit=async e=>{e.preventDefault();ok.disabled=true;cancel.disabled=true;error.hidden=true;try{const data=Object.fromEntries(Object.entries(inputs).map(([k,v])=>[k,v.value.trim()]));if(removeAttachment)data.image=null;if(file){ok.textContent=en()?'Processing…':'處理中…';data.image={id:crypto.randomUUID(),...await readAttachment(file,{language:en()?'en':'zh'})};}capture();submit(data);dialog.close();dialog.remove();await changed();}catch(e){error.hidden=false;error.textContent=e.message;}finally{ok.disabled=false;cancel.disabled=false;ok.textContent=t('完成');}};
-    document.body.append(dialog);dialog.onclose=()=>dialog.remove();dialog.oncancel=e=>{if(ok.disabled)e.preventDefault();};dialog.showModal();
+    document.body.append(dialog);dialog.onclose=()=>{dialog.querySelectorAll('.category-combobox-input').forEach(el=>el.dispatchEvent(new Event('category-combobox-dispose')));dialog.remove();};dialog.oncancel=e=>{if(ok.disabled)e.preventDefault();};dialog.showModal();comboboxBindings.forEach(fn=>fn());
   }
   const put=(list,row,data,defaults)=>{if(row)Object.assign(row,data);else list.push({...defaults(),...data});};
   const dayOptions=()=>[['','不限日期'],...trip.days.map((d,i)=>[d.id,'D'+(i+1)+' '+d.date])];
