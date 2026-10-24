@@ -20,6 +20,7 @@ export async function installSharedRuntime(config) {
   };
   const copy = v => structuredClone(v);
   const seed = sharedProject(window.__travelSharedTrip);
+  const seedSig = JSON.stringify(seed);
   let previewBaseline = copy(seed);
   const identity = config.repository + ':' + config.branch + ':' + config.path + ':' + seed.tripId;
   const key = 'travel-shared:' + identity, tokenKey = key + ':token';
@@ -40,9 +41,15 @@ export async function installSharedRuntime(config) {
     const isEditing = localStorage.getItem(key + ':editing') === '1';
     const exited = sessionStorage.getItem(key + ':exited') === '1';
     token = (isEditing && !exited) ? (localStorage.getItem(tokenKey) || '') : '';
-    legacyDraft=JSON.parse(localStorage.getItem(key+':legacy')||'null');if(legacyDraft?.base?.tripId!==seed.tripId)legacyDraft=null;
+    legacyDraft=JSON.parse(localStorage.getItem(key+':legacy')||'null');
+    if(legacyDraft?.base?.tripId!==seed.tripId || JSON.stringify(legacyDraft?.trip?.previewState?.expenses||[])===JSON.stringify(seed.previewState?.expenses||[])){legacyDraft=null;try{localStorage.removeItem(key+':legacy');}catch{}}
     const saved = JSON.parse(localStorage.getItem(key) || 'null');
-    if (saved?.base?.tripId === seed.tripId && saved?.trip?.tripId === seed.tripId) { base = saved.base; trip = saved.trip; dirty = Boolean(saved.dirty); savedShared = true; }
+    if (saved?.seedSig === seedSig && saved?.base?.tripId === seed.tripId && saved?.trip?.tripId === seed.tripId) {
+      base = saved.base;
+      trip = token && saved.dirty ? saved.trip : copy(saved.base);
+      dirty = Boolean(token && saved.dirty);
+      savedShared = true;
+    }
   } catch {}
   const personalState = window.getTravelPreviewState?.();
   if(!preview && !savedShared && personalState && JSON.stringify(personalState.expenses)!==JSON.stringify(window.__travelPublishedPreviewState?.expenses)) {
@@ -50,7 +57,14 @@ export async function installSharedRuntime(config) {
     legacyDraft={base:copy(seed),trip:personalTrip};
     try{localStorage.setItem(key+':legacy',JSON.stringify(legacyDraft));}catch{}
   }
-  if(token&&legacyDraft&&!dirty){base=copy(legacyDraft.base);trip=mergeShared(legacyDraft.base,legacyDraft.trip,trip).trip;dirty=true;}
+  const applyLegacy = () => {
+    const legacyExpenses = legacyDraft?.trip?.previewState?.expenses || [];
+    const currentExpenses = trip.previewState?.expenses || [];
+    const mergedExpenses = [...new Map([...currentExpenses, ...legacyExpenses].map(e => [e.id, e])).values()];
+    trip.previewState = { ...trip.previewState, expenses: mergedExpenses };
+    dirty = JSON.stringify(trip) !== JSON.stringify(base);
+  };
+  if(token&&legacyDraft&&!dirty)applyLegacy();
   const client = preview ? null : createSharedClient(config, () => token);
   const style = document.createElement('style');
   style.textContent = `
@@ -70,7 +84,7 @@ export async function installSharedRuntime(config) {
   document.body.append(status);
   let toastTimer;
   const message = text => { if(['Up to date','已取得最新共享資料'].includes(text)||text.startsWith('預覽修改已同步')||text.startsWith('Preview changes are in desktop memory')||text.startsWith('變更已暫存')||text.startsWith('Changes saved on this device'))return;status.textContent=text;status.hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(()=>status.hidden=true,4200); };
-  const persist = () => { if(preview)return; try { localStorage.setItem(key, JSON.stringify({ base, trip, dirty })); } catch { message('裝置無法保存草稿，關閉前請完成共享儲存。'); } };
+  const persist = () => { if(preview)return; try { localStorage.setItem(key, JSON.stringify({ seedSig, base, trip, dirty })); } catch { message('裝置無法保存草稿，關閉前請完成共享儲存。'); } };
   const paths = { addDay:'M3 5h18v16H3ZM7 2v6M17 2v6M3 10h18M12 13v5M9.5 15.5h5', addStop:'M12 21s-7-6-7-12a7 7 0 0 1 14 0c0 6-7 12-7 12ZM12 6v6M9 9h6', add:'M12 5v14M5 12h14', edit:'m16 3 5 5-12 12-6 1 1-6Z M14 5l5 5', delete:'M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7', save:'M5 3h12l4 4v14H3V3ZM7 3v6h10V3M7 21v-8h10v8', refresh:'M20 7v5h-5M4 17v-5h5M19 12a7 7 0 0 0-12-5M5 12a7 7 0 0 0 12 5', up:'m6 14 6-6 6 6', down:'m6 10 6 6 6-6', check:'m5 12 5 5L20 7' };
   const en = () => document.documentElement.lang === 'en';
   const labels = {"新增注意事項": "Add note", "新增口袋名單": "Add saved place", "新增清單分類": "Add checklist group", "新增準備項目": "Add checklist item", "新增行程地點": "Add stop", "新增日期": "Add day", "往前移": "Move earlier", "往後移": "Move later", "注意事項": "Note", "口袋名單": "Saved place", "清單分類": "Checklist group", "準備項目": "Checklist item", "行程日期": "Day", "行程地點": "Stop", "標題": "Title", "內容": "Content", "連結": "Link", "日期": "Day", "名稱": "Name", "類型": "Type", "分類": "Group", "地址": "Address", "備註": "Notes", "分類名稱": "Group name", "數量": "Quantity", "同行者": "Traveler", "不限日期": "Any day", "共同": "Shared", "景點": "Attraction", "食物": "Food", "美食": "Food", "住宿": "Hotel", "航班": "Flight", "其他": "Other", "抵達時間": "Arrival time", "結束時間": "End time", "Google Maps 連結": "Google Maps link", "官網／訂位連結": "Website / booking link", "開門時間": "Opening time", "關門時間": "Closing time", "入住時間": "Check-in", "退房時間": "Check-out", "航班號": "Flight number", "出發機場": "Departure airport", "抵達機場": "Arrival airport", "起飛時間": "Departure time", "降落時間": "Landing time", "前往下一站方式": "Travel to next stop", "未設定": "Not set", "步行": "Walking", "大眾運輸": "Public transit", "開車": "Driving", "前往下一站時間": "Travel duration", "前往下一站距離": "Travel distance", "取消": "Cancel", "完成": "Done", "完成編輯": "Done editing", "結束編輯": "Exit editing", "清除授權": "Clear token", "編輯授權": "Editing access", "Token 只保存在這台裝置，不會發布到 GitHub。需要目標儲存庫 Contents 寫入權限。": "The token stays on this device. It needs Contents write permission for this repository.", "記住此裝置的授權": "Remember access on this device", "移除授權": "Remove access", "驗證並進入編輯模式": "Verify and enable editing", "儲存共享旅程": "Save shared trip", "同步共享資料": "Sync", "圖片／PDF 附件（單檔最多 2 MB）": "Image / PDF attachment (up to 2 MB)", "移除原附件": "Remove existing attachment"};
@@ -310,7 +324,14 @@ export async function installSharedRuntime(config) {
       if(document.querySelector('.shared-dialog[open],#global-expense-modal.active')){lastRead=0;return;}
       window.__travelSharedReadAt=Date.now();
       if(!manual&&deferredSha===latest.sha)return;
+      if(JSON.stringify(latest.value.seed)!==seedSig && JSON.stringify(latest.value.trip)===JSON.stringify(latest.value.seed)){if(!applied){window.applyTravelSharedState?.(trip);applied=true;}return;}
       if(JSON.stringify(base)===JSON.stringify(latest.value.trip)){if(!applied){window.applyTravelSharedState?.(trip);applied=true;}return;}
+      if(!token||!dirty){
+        const changed=JSON.stringify(trip)!==JSON.stringify(latest.value.trip);
+        base=copy(latest.value.trip);trip=copy(latest.value.trip);dirty=false;deferredSha=null;persist();
+        if(changed)await redraw();else{if(!applied){window.applyTravelSharedState?.(trip);applied=true;}controls();}
+        return;
+      }
       if(token)capture();
       setBusy(true);locked=true;lock(true);message(en()?'Shared changes found. Updating and merging…':'發現共享變更，正在更新與合併…');
       const merged=await resolveSharedMerge(base,trip,latest.value.trip,{reading:true});
@@ -345,7 +366,7 @@ export async function installSharedRuntime(config) {
     d.querySelector('[data-remove]').onclick=()=>{exitEditing();d.close();};
     const forgetBtn=d.querySelector('[data-forget]');if(forgetBtn)forgetBtn.onclick=()=>{try{localStorage.removeItem(tokenKey);localStorage.setItem(key+':editing','0');}catch{}exitEditing();d.close();message(text('已清除本機記住的授權','Remembered token cleared'));};
     d.querySelector('form').onsubmit=async e=>{e.preventDefault();const f=e.target;if(preview){token='preview';controls();notifyPreview(false);d.close();return;}const entered=(f.elements.token.value.trim()||remembered),b=f.querySelector('[type=submit]');if(!entered){f.querySelector('[role=status]').textContent=text('請先輸入 GitHub Token。','Enter your GitHub token first.');f.elements.token.focus();return;}b.disabled=true;
-      try{const response=await fetch('https://api.github.com/repos/'+config.repository,{headers:{Authorization:'Bearer '+entered,Accept:'application/vnd.github+json'},cache:'no-store',redirect:'error',signal:AbortSignal.timeout(25000)});if(!response.ok)throw Error('Token 驗證失敗，請檢查授權。');const repo=await response.json();if(!repo.permissions?.push)throw Error('這份授權沒有儲存庫寫入資格。');token=entered;try{localStorage.setItem(key+':editing','1');sessionStorage.removeItem(key+':exited');}catch{}try{if(f.elements.remember.checked)localStorage.setItem(tokenKey,token);else localStorage.removeItem(tokenKey);}catch{message('授權只暫留於此頁，裝置無法記住 Token。');}f.elements.token.value='';d.close();if(legacyDraft&&!dirty){base=copy(legacyDraft.base);trip=mergeShared(legacyDraft.base,legacyDraft.trip,trip).trip;dirty=true;persist();await redraw();}controls();await refresh(true);}catch(e){f.querySelector('[role=status]').textContent=e.message;}finally{b.disabled=false;}};
+      try{const response=await fetch('https://api.github.com/repos/'+config.repository,{headers:{Authorization:'Bearer '+entered,Accept:'application/vnd.github+json'},cache:'no-store',redirect:'error',signal:AbortSignal.timeout(25000)});if(!response.ok)throw Error('Token 驗證失敗，請檢查授權。');const repo=await response.json();if(!repo.permissions?.push)throw Error('這份授權沒有儲存庫寫入資格。');token=entered;try{localStorage.setItem(key+':editing','1');sessionStorage.removeItem(key+':exited');}catch{}try{if(f.elements.remember.checked)localStorage.setItem(tokenKey,token);else localStorage.removeItem(tokenKey);}catch{message('授權只暫留於此頁，裝置無法記住 Token。');}f.elements.token.value='';d.close();if(legacyDraft&&!dirty){applyLegacy();persist();await redraw();}controls();await refresh(true);}catch(e){f.querySelector('[role=status]').textContent=e.message;}finally{b.disabled=false;}};
   }
   let taps=0,lastTap=0,lastTarget='';
   document.addEventListener('click',e=>{
