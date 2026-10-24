@@ -1062,7 +1062,7 @@ ${flightCss}</style>${appStyles}${style}<style>${itineraryLayoutCss}${mapGesture
   window.__travelPublishedPreviewState = JSON.parse(JSON.stringify({packing: INITIAL_PACKING, references: INITIAL_REFERENCES, expenses: initialExpenses}));
   const runtimeStorage = (${createRuntimeStorage.toString()})({
     key, legacyKey, legacyKeys: ["travel-preview-id:" + identity], editor: EDITOR_PREVIEW, authoritative: Boolean(INITIAL_PREVIEW_STATE),
-    initial: { ":packing": INITIAL_PACKING, ":references": INITIAL_REFERENCES, ":expenses": initialExpenses, ":deleted-expenses": [] },
+    initial: { ":packing": INITIAL_PACKING, ":global-packing": { ...INITIAL_PACKING, ...(INITIAL_PREVIEW_STATE?.packing || {}) }, ":references": INITIAL_REFERENCES, ":expenses": initialExpenses, ":deleted-expenses": [] },
     storage: () => localStorage,
     onFailure: () => alert(lang === "en" ? "Your browser could not save this change. It is kept on this page for now. Share expenses & checklist before closing to avoid losing it." : "瀏覽器未能保存這次變更，目前暫留在此頁。請在關閉前使用「分享記帳與清單」備份，以免遺失。")
   });
@@ -1647,7 +1647,7 @@ ${flightCss}</style>${appStyles}${style}<style>${itineraryLayoutCss}${mapGesture
           if (other.dataset.packId === box.dataset.packId) other.checked = box.checked;
         });
         write(":packing", packed);
-        window.dispatchEvent(new Event("travel-preview-change"));
+        if (EDITOR_PREVIEW) window.dispatchEvent(new Event("travel-preview-change"));
         refreshPackingBadges();
       };
     });
@@ -2094,10 +2094,31 @@ ${flightCss}</style>${appStyles}${style}<style>${itineraryLayoutCss}${mapGesture
     window.bindImageLightbox = bindImageLightbox;
     window.bindTextSizeToggle = bindTextSizeToggle;
   }
-  window.applyTravelSharedState = function(next) {
+  function syncSharedPacking(next) {
     INITIAL_PREVIEW_STATE = next.previewState || {};
-    INITIAL_PACKING = Object.fromEntries((next.packingGroups || []).flatMap(g => (g.items || []).map(i => [i.id,Boolean(i.checked)])));
-    runtimeStorage.replace(':packing', { ...INITIAL_PACKING, ...(INITIAL_PREVIEW_STATE.packing || {}) });
+    INITIAL_PACKING = Object.fromEntries((next.packingGroups || []).flatMap(g => (g.items || []).map(i => [i.id, Boolean(i.checked)])));
+    const nextGlobalPacking = { ...INITIAL_PACKING, ...(INITIAL_PREVIEW_STATE.packing || {}) };
+    if (EDITOR_PREVIEW) {
+      runtimeStorage.replace(':packing', nextGlobalPacking);
+      return;
+    }
+    const prevGlobal = read(':global-packing') || INITIAL_PACKING;
+    const existingLocal = read(':packing') || {};
+    if (runtimeStorage.hasSaved(':packing')) {
+      const merged = {};
+      for (const id of Object.keys(nextGlobalPacking)) {
+        merged[id] = (id in prevGlobal && Boolean(nextGlobalPacking[id]) !== Boolean(prevGlobal[id]))
+          ? Boolean(nextGlobalPacking[id])
+          : (id in existingLocal ? Boolean(existingLocal[id]) : Boolean(nextGlobalPacking[id]));
+      }
+      write(':packing', merged);
+    } else {
+      runtimeStorage.replace(':packing', nextGlobalPacking);
+    }
+    write(':global-packing', nextGlobalPacking);
+  }
+  window.applyTravelSharedState = function(next) {
+    syncSharedPacking(next);
     runtimeStorage.replace(':expenses', INITIAL_PREVIEW_STATE.expenses || next.expenses || []);
     bindPacking();
     if(content.querySelector('.feature-page.active[id^="expenses-"]'))renderExpenseReport();
@@ -2117,10 +2138,8 @@ ${flightCss}</style>${appStyles}${style}<style>${itineraryLayoutCss}${mapGesture
     heroDayNav.innerHTML = parsed.querySelector('.hero-day-nav').innerHTML;
     document.querySelector('.hero-top h1').textContent = next.title || '未命名旅程';
     SHARED_TRIP = next; window.__travelSharedTrip = next;
-    INITIAL_PREVIEW_STATE = next.previewState || {};
-    INITIAL_PACKING = Object.fromEntries((next.packingGroups || []).flatMap(g => (g.items || []).map(i => [i.id, Boolean(i.checked)])));
     transferTrip = next;
-    runtimeStorage.replace(':packing', { ...INITIAL_PACKING, ...(INITIAL_PREVIEW_STATE.packing || {}) });
+    syncSharedPacking(next);
     runtimeStorage.replace(':expenses', INITIAL_PREVIEW_STATE.expenses || next.expenses || []);
     DAYS = [{id:'day-0',date:'行前',title:'行前支出'}].concat(next.days);
     MEMBERS = next.settings?.travelers || []; CATS = next.settings?.expenseCategories || CATS;

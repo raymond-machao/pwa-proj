@@ -28,7 +28,7 @@ export function createRuntimeStorage({ key, legacyKey, legacyKeys = [], editor, 
     write(suffix, value) {
       memory[suffix] = value;
       if (editor) return;
-      try { storage().setItem(key + suffix, JSON.stringify(value)); failed.delete(suffix); }
+      try { storage().setItem(key + suffix, JSON.stringify(value)); local.add(suffix); failed.delete(suffix); }
       catch {
         if (!failed.has(suffix)) { failed.add(suffix); onFailure(); }
       }
