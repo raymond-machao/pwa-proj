@@ -19,8 +19,52 @@ export async function installSharedRuntime(config) {
     });
   };
   const copy = v => structuredClone(v);
+  const hashText = str => {
+    let h1 = 0xdeadbeef ^ str.length, h2 = 0x41c6ce57 ^ str.length;
+    for (let i = 0; i < str.length; i++) {
+      const ch = str.charCodeAt(i);
+      h1 = Math.imul(h1 ^ ch, 2654435761);
+      h2 = Math.imul(h2 ^ ch, 1597334677);
+    }
+    h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+    h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+    return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36) + ':' + str.length;
+  };
   const seed = sharedProject(window.__travelSharedTrip);
-  const seedSig = JSON.stringify(seed);
+  const seedRaw = JSON.stringify(seed);
+  const seedSig = hashText(seedRaw);
+  const seedBlobs = new Map();
+  JSON.stringify(seed, (_, v) => {
+    if (typeof v === 'string' && v.length > 1024) seedBlobs.set(hashText(v), v);
+    return v;
+  });
+  const packStorage = value => {
+    const extraBlobs = {};
+    const body = JSON.stringify(value, (k, v) => {
+      if (k === '_blobs') return v;
+      if (typeof v === 'string' && v.length > 1024) {
+        const h = hashText(v);
+        if (seedBlobs.has(h)) return '__seedBlob:' + h;
+        extraBlobs[h] = v;
+        return '__extraBlob:' + h;
+      }
+      return v;
+    });
+    return Object.keys(extraBlobs).length ? JSON.stringify({ ...JSON.parse(body), _blobs: extraBlobs }) : body;
+  };
+  const unpackStorage = raw => {
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    const extra = parsed?._blobs || {};
+    return JSON.parse(raw, (k, v) => {
+      if (k === '_blobs') return undefined;
+      if (typeof v === 'string') {
+        if (v.startsWith('__seedBlob:')) return seedBlobs.get(v.slice(11)) ?? v;
+        if (v.startsWith('__extraBlob:')) return extra[v.slice(12)] ?? v;
+      }
+      return v;
+    });
+  };
   let previewBaseline = copy(seed);
   const identity = config.repository + ':' + config.branch + ':' + config.path + ':' + seed.tripId;
   const key = 'travel-shared:' + identity, tokenKey = key + ':token';
@@ -41,21 +85,27 @@ export async function installSharedRuntime(config) {
     const isEditing = localStorage.getItem(key + ':editing') === '1';
     const exited = sessionStorage.getItem(key + ':exited') === '1';
     token = (isEditing && !exited) ? (localStorage.getItem(tokenKey) || '') : '';
-    legacyDraft=JSON.parse(localStorage.getItem(key+':legacy')||'null');
+    legacyDraft=unpackStorage(localStorage.getItem(key+':legacy'));
     if(legacyDraft?.base?.tripId!==seed.tripId || JSON.stringify(legacyDraft?.trip?.previewState?.expenses||[])===JSON.stringify(seed.previewState?.expenses||[])){legacyDraft=null;try{localStorage.removeItem(key+':legacy');}catch{}}
-    const saved = JSON.parse(localStorage.getItem(key) || 'null');
-    if (saved?.seedSig === seedSig && saved?.base?.tripId === seed.tripId && saved?.trip?.tripId === seed.tripId) {
-      base = saved.base;
-      trip = token && saved.dirty ? saved.trip : copy(saved.base);
-      dirty = Boolean(token && saved.dirty);
-      savedShared = true;
+    const saved = unpackStorage(localStorage.getItem(key));
+    if (saved?.seedSig === seedSig) {
+      const savedBase = saved.base || copy(seed);
+      const savedTrip = saved.trip || copy(savedBase);
+      if (savedBase.tripId === seed.tripId && savedTrip.tripId === seed.tripId) {
+        base = savedBase;
+        trip = token && saved.dirty ? savedTrip : copy(savedBase);
+        dirty = Boolean(token && saved.dirty);
+        savedShared = true;
+      }
+    } else if (saved) {
+      try { localStorage.removeItem(key); } catch {}
     }
   } catch {}
   const personalState = window.getTravelPreviewState?.();
   if(!preview && !savedShared && personalState && JSON.stringify(personalState.expenses)!==JSON.stringify(window.__travelPublishedPreviewState?.expenses)) {
     const personalTrip=copy(seed);personalTrip.previewState={...personalTrip.previewState,expenses:personalState.expenses};
     legacyDraft={base:copy(seed),trip:personalTrip};
-    try{localStorage.setItem(key+':legacy',JSON.stringify(legacyDraft));}catch{}
+    try{localStorage.setItem(key+':legacy',packStorage(legacyDraft));}catch{}
   }
   const applyLegacy = () => {
     const legacyExpenses = legacyDraft?.trip?.previewState?.expenses || [];
@@ -84,7 +134,7 @@ export async function installSharedRuntime(config) {
   document.body.append(status);
   let toastTimer;
   const message = text => { if(['Up to date','已取得最新共享資料'].includes(text)||text.startsWith('預覽修改已同步')||text.startsWith('Preview changes are in desktop memory')||text.startsWith('變更已暫存')||text.startsWith('Changes saved on this device'))return;status.textContent=text;status.hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(()=>status.hidden=true,4200); };
-  const persist = () => { if(preview)return; try { localStorage.setItem(key, JSON.stringify({ seedSig, base, trip, dirty })); } catch { message('裝置無法保存草稿，關閉前請完成共享儲存。'); } };
+  const persist = () => { if(preview)return; try { const baseSame = JSON.stringify(base) === seedRaw; localStorage.setItem(key, packStorage({ seedSig, base: baseSame ? null : base, trip: dirty ? trip : null, dirty })); } catch { if(dirty) message('裝置無法保存草稿，關閉前請完成共享儲存。'); } };
   const paths = { addDay:'M3 5h18v16H3ZM7 2v6M17 2v6M3 10h18M12 13v5M9.5 15.5h5', addStop:'M12 21s-7-6-7-12a7 7 0 0 1 14 0c0 6-7 12-7 12ZM12 6v6M9 9h6', add:'M12 5v14M5 12h14', edit:'m16 3 5 5-12 12-6 1 1-6Z M14 5l5 5', delete:'M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7', save:'M5 3h12l4 4v14H3V3ZM7 3v6h10V3M7 21v-8h10v8', refresh:'M20 7v5h-5M4 17v-5h5M19 12a7 7 0 0 0-12-5M5 12a7 7 0 0 0 12 5', up:'m6 14 6-6 6 6', down:'m6 10 6 6 6-6', check:'m5 12 5 5L20 7' };
   const en = () => document.documentElement.lang === 'en';
   const labels = {"新增注意事項": "Add note", "新增口袋名單": "Add saved place", "新增清單分類": "Add checklist group", "新增準備項目": "Add checklist item", "新增行程地點": "Add stop", "新增日期": "Add day", "往前移": "Move earlier", "往後移": "Move later", "注意事項": "Note", "口袋名單": "Saved place", "清單分類": "Checklist group", "準備項目": "Checklist item", "行程日期": "Day", "行程地點": "Stop", "標題": "Title", "內容": "Content", "連結": "Link", "日期": "Day", "名稱": "Name", "類型": "Type", "分類": "Group", "地址": "Address", "備註": "Notes", "分類名稱": "Group name", "數量": "Quantity", "同行者": "Traveler", "不限日期": "Any day", "共同": "Shared", "景點": "Attraction", "食物": "Food", "美食": "Food", "住宿": "Hotel", "航班": "Flight", "其他": "Other", "抵達時間": "Arrival time", "結束時間": "End time", "Google Maps 連結": "Google Maps link", "官網／訂位連結": "Website / booking link", "開門時間": "Opening time", "關門時間": "Closing time", "入住時間": "Check-in", "退房時間": "Check-out", "航班號": "Flight number", "出發機場": "Departure airport", "抵達機場": "Arrival airport", "起飛時間": "Departure time", "降落時間": "Landing time", "前往下一站方式": "Travel to next stop", "未設定": "Not set", "步行": "Walking", "大眾運輸": "Public transit", "開車": "Driving", "前往下一站時間": "Travel duration", "前往下一站距離": "Travel distance", "取消": "Cancel", "完成": "Done", "完成編輯": "Done editing", "結束編輯": "Exit editing", "清除授權": "Clear token", "編輯授權": "Editing access", "Token 只保存在這台裝置，不會發布到 GitHub。需要目標儲存庫 Contents 寫入權限。": "The token stays on this device. It needs Contents write permission for this repository.", "記住此裝置的授權": "Remember access on this device", "移除授權": "Remove access", "驗證並進入編輯模式": "Verify and enable editing", "儲存共享旅程": "Save shared trip", "同步共享資料": "Sync", "圖片／PDF 附件（單檔最多 2 MB）": "Image / PDF attachment (up to 2 MB)", "移除原附件": "Remove existing attachment"};
@@ -324,7 +374,8 @@ export async function installSharedRuntime(config) {
       if(document.querySelector('.shared-dialog[open],#global-expense-modal.active')){lastRead=0;return;}
       window.__travelSharedReadAt=Date.now();
       if(!manual&&deferredSha===latest.sha)return;
-      if(JSON.stringify(latest.value.seed)!==seedSig && JSON.stringify(latest.value.trip)===JSON.stringify(latest.value.seed)){if(!applied){window.applyTravelSharedState?.(trip);applied=true;}return;}
+      const latestSeedRaw=JSON.stringify(latest.value.seed);
+      if(hashText(latestSeedRaw)!==seedSig && JSON.stringify(latest.value.trip)===latestSeedRaw){if(!applied){window.applyTravelSharedState?.(trip);applied=true;}return;}
       if(JSON.stringify(base)===JSON.stringify(latest.value.trip)){if(!applied){window.applyTravelSharedState?.(trip);applied=true;}return;}
       if(!token||!dirty){
         const changed=JSON.stringify(trip)!==JSON.stringify(latest.value.trip);
