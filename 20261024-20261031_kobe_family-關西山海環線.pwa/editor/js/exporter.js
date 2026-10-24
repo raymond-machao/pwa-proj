@@ -2097,7 +2097,7 @@ ${flightCss}</style>${appStyles}${style}<style>${itineraryLayoutCss}${mapGesture
   window.applyTravelSharedState = function(next) {
     INITIAL_PREVIEW_STATE = next.previewState || {};
     INITIAL_PACKING = Object.fromEntries((next.packingGroups || []).flatMap(g => (g.items || []).map(i => [i.id,Boolean(i.checked)])));
-    runtimeStorage.replace(':packing', INITIAL_PREVIEW_STATE.packing || INITIAL_PACKING);
+    runtimeStorage.replace(':packing', { ...INITIAL_PACKING, ...(INITIAL_PREVIEW_STATE.packing || {}) });
     runtimeStorage.replace(':expenses', INITIAL_PREVIEW_STATE.expenses || next.expenses || []);
     bindPacking();
     if(content.querySelector('.feature-page.active[id^="expenses-"]'))renderExpenseReport();
@@ -2120,7 +2120,7 @@ ${flightCss}</style>${appStyles}${style}<style>${itineraryLayoutCss}${mapGesture
     INITIAL_PREVIEW_STATE = next.previewState || {};
     INITIAL_PACKING = Object.fromEntries((next.packingGroups || []).flatMap(g => (g.items || []).map(i => [i.id, Boolean(i.checked)])));
     transferTrip = next;
-    runtimeStorage.replace(':packing', INITIAL_PREVIEW_STATE.packing || INITIAL_PACKING);
+    runtimeStorage.replace(':packing', { ...INITIAL_PACKING, ...(INITIAL_PREVIEW_STATE.packing || {}) });
     runtimeStorage.replace(':expenses', INITIAL_PREVIEW_STATE.expenses || next.expenses || []);
     DAYS = [{id:'day-0',date:'行前',title:'行前支出'}].concat(next.days);
     MEMBERS = next.settings?.travelers || []; CATS = next.settings?.expenseCategories || CATS;

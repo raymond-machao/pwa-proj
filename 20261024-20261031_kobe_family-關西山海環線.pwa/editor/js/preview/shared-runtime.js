@@ -26,6 +26,20 @@ export async function installSharedRuntime(config) {
   let token = '', base = copy(seed), trip = copy(seed), envelope = null, dirty = false, busy = false, lastRead = 0, applied = false, savedShared = false, legacyDraft = null;
   let reading=false,deferredSha=null,lastReadError='';
   if(preview)token=window.__travelPreviewEditing?"preview":"";
+  const activeToken = () => token || (!preview ? (localStorage.getItem(tokenKey) || '') : '');
+  function normTrip(t) {
+    const c = copy(t);
+    const ps = c.previewState || {};
+    const packing = Object.fromEntries((c.packingGroups || []).flatMap(g => (g.items || []).map(i => [i.id, Boolean(ps.packing?.[i.id] ?? i.checked)])));
+    c.previewState = { packing, references: ps.references || {}, expenses: ps.expenses || [] };
+    for (const g of c.packingGroups || []) for (const i of g.items || []) i.checked = Boolean(packing[i.id]);
+    return c;
+  }
+  const hasChanges = () => JSON.stringify(normTrip(trip)) !== JSON.stringify(normTrip(base));
+  function capture() {
+    const state=window.getTravelPreviewState?.();
+    if(state) { trip.previewState=state;for(const g of trip.packingGroups||[])for(const i of g.items||[])if(i.id in state.packing)i.checked=state.packing[i.id]; }
+  }
   if(!preview)try {
     const isEditing = localStorage.getItem(key + ':editing') === '1';
     const exited = sessionStorage.getItem(key + ':exited') === '1';
@@ -41,8 +55,12 @@ export async function installSharedRuntime(config) {
     legacyDraft={base:copy(seed),trip:personalTrip};
     try{localStorage.setItem(key+':legacy',JSON.stringify(legacyDraft));}catch{}
   }
+  if(!preview && savedShared && !dirty && personalState && JSON.stringify(personalState)!==JSON.stringify(trip.previewState) && JSON.stringify(personalState)!==JSON.stringify(window.__travelPublishedPreviewState)) {
+    capture();
+    dirty=hasChanges();
+  }
   if(token&&legacyDraft&&!dirty){base=copy(legacyDraft.base);trip=mergeShared(legacyDraft.base,legacyDraft.trip,trip).trip;dirty=true;}
-  const client = preview ? null : createSharedClient(config, () => token);
+  const client = preview ? null : createSharedClient(config, activeToken);
   const style = document.createElement('style');
   style.textContent = `
 .shared-dialog{width:calc(100% - 24px);max-width:440px;max-height:85dvh;overflow:auto;border:1px solid #e7d7c7;border-radius:14px;background:#fff;color:#352b23;padding:14px;font-family:inherit;font-size:13.5px;line-height:1.45}
@@ -81,16 +99,13 @@ export async function installSharedRuntime(config) {
     }));
     host.append(bar);
   }
-  function capture() {
-    const state=window.getTravelPreviewState?.();
-    if(state) { trip.previewState=state;for(const g of trip.packingGroups||[])for(const i of g.items||[])if(i.id in state.packing)i.checked=state.packing[i.id]; }
-  }
   function guardReadonly() {
     window.__travelSharedReadonly=false;
     document.documentElement.classList.toggle('shared-editing',Boolean(token));
     document.querySelectorAll('[data-pack-id]').forEach(b=>b.disabled=busy);
     document.querySelectorAll('.day-expense').forEach(b=>b.hidden=false);
   }
+  function exitEditing() { token = ''; if (!preview) { try { localStorage.setItem(key + ':editing', '0'); sessionStorage.setItem(key + ':exited', '1'); } catch {} } notifyPreview(false); controls(); message(en() ? 'Exited editing mode' : '已結束編輯模式'); }
   function controls() {
     document.querySelectorAll('.shared-actions,.shared-editor-bar,.shared-warning').forEach(n=>n.remove());
     guardReadonly();
@@ -99,13 +114,14 @@ export async function installSharedRuntime(config) {
     if(stale && seed.settings?.showMap!==false) {
       const warning=document.createElement('p');warning.className='shared-warning';warning.textContent=en()?'Itinerary changed. Republish maps from the desktop; navigation links remain available.':'行程地點或順序已變更，地圖須由電腦重新發布；仍可使用外部導航。';document.querySelector('.hero')?.append(warning);
     }
-    function exitEditing() { token = ''; try { localStorage.setItem(key + ':editing', '0'); sessionStorage.setItem(key + ':exited', '1'); } catch {} notifyPreview(false); controls(); message(en() ? 'Exited editing mode' : '已結束編輯模式'); }
+    if(token || (!preview && dirty)) {
+      const bar=document.createElement('div');bar.className='shared-editor-bar';
+      bar.append(button('save',preview?(en()?'Save project':'儲存專案'):(en()?'Save shared trip':'儲存共享旅程'),()=>save()));bar.firstChild.classList.toggle('shared-dirty',dirty);
+      if(token)bar.append(button('check', en() ? 'Done editing' : '完成編輯', exitEditing));
+      const fontButton=document.getElementById('text-size-toggle');
+      if(fontButton){let stack=fontButton.closest('.hero-tool-stack');if(!stack){stack=document.createElement('div');stack.className='hero-tool-stack';fontButton.replaceWith(stack);stack.append(fontButton);}stack.append(bar);}
+    }
     if(!token){window.syncTravelLayout?.();return;}
-    const bar=document.createElement('div');bar.className='shared-editor-bar';
-    bar.append(button('save',preview?(en()?'Save project':'儲存專案'):(en()?'Save shared trip':'儲存共享旅程'),save));bar.firstChild.classList.toggle('shared-dirty',dirty);
-    bar.append(button('check', en() ? 'Exit editing' : '結束編輯', exitEditing));
-    const fontButton=document.getElementById('text-size-toggle');
-    if(fontButton){let stack=fontButton.closest('.hero-tool-stack');if(!stack){stack=document.createElement('div');stack.className='hero-tool-stack';fontButton.replaceWith(stack);stack.append(fontButton);}stack.append(bar);}
     for(const page of document.querySelectorAll('.feature-page')) {
       const add=(label,action)=>{const b=document.createElement('div');b.className='shared-actions shared-page-add';b.append(button('add',label,action));page.prepend(b);};
       if(page.id.startsWith('notes')) {add('新增注意事項',()=>editNote());for(const row of trip.notes||[])actions(page.querySelector('[data-shared-note="'+CSS.escape(row.id)+'"] .note-stop-text .stop-top'),row,trip.notes,editNote,true);}
@@ -306,7 +322,7 @@ export async function installSharedRuntime(config) {
       window.__travelSharedReadAt=Date.now();
       if(!manual&&deferredSha===latest.sha)return;
       if(JSON.stringify(base)===JSON.stringify(latest.value.trip)){if(!applied){window.applyTravelSharedState?.(trip);applied=true;}return;}
-      if(token)capture();
+      if(token||dirty)capture();
       setBusy(true);locked=true;lock(true);message(en()?'Shared changes found. Updating and merging…':'發現共享變更，正在更新與合併…');
       const merged=await resolveSharedMerge(base,trip,latest.value.trip,{reading:true});
       if(!merged){deferredSha=latest.sha;message(en()?'Update postponed. Your draft is kept; Save will check again.':'已暫緩共享更新，草稿仍保留；按儲存會再次核對。');return;}
@@ -315,32 +331,38 @@ export async function installSharedRuntime(config) {
       message(en()?'Shared changes merged. Your unsaved edits are kept.':'共享更新已合併，自己的未儲存修改仍保留。');
     }catch(e){const reason=navigator.onLine?e.message:'目前離線，保留裝置上的資料。';if(lastReadError!==reason){lastReadError=reason;message(reason);}}finally{reading=false;if(locked){lock(false);setBusy(false);}}
   }
-  async function save() {
-    if(busy||!token)return;capture();if(preview){setBusy(true);try{if(!await notifyPreview(true))return;const saved=await new Promise(resolve=>window.dispatchEvent(new CustomEvent('travel-shared-preview-save',{detail:{complete:resolve}})));if(saved){dirty=false;controls();message(en()?'Project saved':'專案已儲存');}}finally{setBusy(false);}return;}dirty=true;persist();setBusy(true);
+  async function save(overrideToken='') {
+    if(busy)return;
+    if(preview){if(!token)return;capture();setBusy(true);try{if(!await notifyPreview(true))return;const saved=await new Promise(resolve=>window.dispatchEvent(new CustomEvent('travel-shared-preview-save',{detail:{complete:resolve}})));if(saved){dirty=false;controls();message(en()?'Project saved':'專案已儲存');}}finally{setBusy(false);}return;}
+    const writeToken=typeof overrideToken==='string'&&overrideToken?overrideToken:activeToken();
+    if(!writeToken){authorization({saveAfterAuth:true});return;}
+    capture();dirty=true;persist();setBusy(true);
+    const writeClient=createSharedClient(config,()=>writeToken);
     try {
       let candidate=copy(trip), ancestor=copy(base);
       for(let attempt=0;attempt<3;attempt++){
-        const latest=await client.read();assertShared(latest.value,seed.tripId);
+        const latest=await writeClient.read();assertShared(latest.value,seed.tripId);
         const merged=await resolveSharedMerge(ancestor,candidate,latest.value.trip);if(!merged){message('已取消，草稿仍保留。');return;}
         const next={...latest.value,trip:sharedProject(merged),updatedAt:new Date().toISOString()};
-        try {await client.write(next,latest.sha);base=copy(next.trip);trip=copy(base);envelope=next;dirty=false;deferredSha=null;legacyDraft=null;try{localStorage.removeItem(key+':legacy');}catch{}persist();await redraw();message(en()?'Shared trip saved':'共享旅程已儲存，其他人連網更新後可看到');return;}
+        try {await writeClient.write(next,latest.sha);base=copy(next.trip);trip=copy(base);envelope=next;dirty=false;deferredSha=null;legacyDraft=null;try{localStorage.removeItem(key+':legacy');}catch{}persist();await redraw();message(en()?'Shared trip saved':'共享旅程已儲存，其他人連網更新後可看到');return;}
         catch(e){if(e.status!==409&&e.status!==422)throw e;ancestor=copy(latest.value.trip);candidate=merged;}
       }
       throw Error('其他人持續修改，請稍後再按儲存；草稿仍保留。');
     }catch(e){message(e.message+' 草稿仍保留，可重試。');}finally{setBusy(false);controls();}
   }
-  function authorization() {
+  function authorization(options={}) {
     if(document.querySelector('.shared-dialog[open]'))return;
+    const saveAfterAuth=Boolean(options?.saveAfterAuth);
     const d=document.createElement('dialog');d.className='shared-dialog shared-auth';
     const text=(zh,english)=>en()?english:zh;
     const remembered=(!preview?localStorage.getItem(tokenKey):'')||'';
-    d.innerHTML='<div class="shared-auth-header"><h2>'+text('編輯模式','Editing mode')+'</h2><button type="button" class="shared-auth-close" data-close aria-label="'+t('取消')+'"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div><p class="shared-auth-copy">'+text('手機需輸入具有 Contents 寫入權限的 Token；電腦預覽可留空直接進入。Token 不會放入旅程或發布檔。','On your phone, enter a token with Contents write permission. Desktop preview can leave it blank. The token is never included in trip or published files.')+'</p><form><label class="shared-auth-token">GitHub Token<input name="token" type="password" placeholder="'+(remembered?text('已記住授權（留空直接使用）','Token remembered (leave blank to use)'):text('貼上 Token','Paste token'))+'" autocomplete="off" autocapitalize="off" spellcheck="false"></label><label class="shared-auth-remember"><input name="remember" type="checkbox" checked>'+t('記住此裝置的授權')+'</label><p class="shared-auth-status" role="status" aria-live="polite"></p><div class="shared-form-actions"><button type="button" data-forget'+(remembered&&!preview?'':' hidden')+'>'+text('清除授權','Clear token')+'</button><button type="button" data-remove'+(token?'':' hidden')+'>'+text('結束編輯','End editing')+'</button><button type="button" data-cancel>'+t('取消')+'</button><button type="submit">'+text('進入編輯模式','Enter editing mode')+'</button></div></form>';
+    d.innerHTML='<div class="shared-auth-header"><h2>'+text('編輯模式','Editing mode')+'</h2><button type="button" class="shared-auth-close" data-close aria-label="'+t('取消')+'"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div><p class="shared-auth-copy">'+text('手機需輸入具有 Contents 寫入權限的 Token；電腦預覽可留空直接進入。Token 不會放入旅程或發布檔。','On your phone, enter a token with Contents write permission. Desktop preview can leave it blank. The token is never included in trip or published files.')+'</p><form><label class="shared-auth-token">GitHub Token<input name="token" type="password" placeholder="'+(remembered?text('已記住授權（留空直接使用）','Token remembered (leave blank to use)'):text('貼上 Token','Paste token'))+'" autocomplete="off" autocapitalize="off" spellcheck="false"></label><label class="shared-auth-remember"><input name="remember" type="checkbox" checked>'+t('記住此裝置的授權')+'</label><p class="shared-auth-status" role="status" aria-live="polite"></p><div class="shared-form-actions"><button type="button" data-forget'+(remembered&&!preview?'':' hidden')+'>'+text('清除授權','Clear token')+'</button><button type="button" data-remove'+(token?'':' hidden')+'>'+text('結束編輯','End editing')+'</button><button type="button" data-cancel>'+t('取消')+'</button><button type="submit">'+(saveAfterAuth?text('驗證並儲存','Verify and save'):text('進入編輯模式','Enter editing mode'))+'</button></div></form>';
     document.body.append(d);d.showModal();d.onclose=()=>{d.querySelector('[name=token]').value='';d.remove();};
     d.querySelector('[data-close]').onclick=d.querySelector('[data-cancel]').onclick=()=>d.close();
     d.querySelector('[data-remove]').onclick=()=>{exitEditing();d.close();};
     const forgetBtn=d.querySelector('[data-forget]');if(forgetBtn)forgetBtn.onclick=()=>{try{localStorage.removeItem(tokenKey);localStorage.setItem(key+':editing','0');}catch{}exitEditing();d.close();message(text('已清除本機記住的授權','Remembered token cleared'));};
-    d.querySelector('form').onsubmit=async e=>{e.preventDefault();const f=e.target;if(preview){token='preview';try{localStorage.setItem(key+':editing','1');sessionStorage.removeItem(key+':exited');}catch{}controls();notifyPreview(false);d.close();return;}const entered=(f.elements.token.value.trim()||remembered),b=f.querySelector('[type=submit]');if(!entered){f.querySelector('[role=status]').textContent=text('請先輸入 GitHub Token。','Enter your GitHub token first.');f.elements.token.focus();return;}b.disabled=true;
-      try{const response=await fetch('https://api.github.com/repos/'+config.repository,{headers:{Authorization:'Bearer '+entered,Accept:'application/vnd.github+json'},cache:'no-store',redirect:'error',signal:AbortSignal.timeout(25000)});if(!response.ok)throw Error('Token 驗證失敗，請檢查授權。');const repo=await response.json();if(!repo.permissions?.push)throw Error('這份授權沒有儲存庫寫入資格。');token=entered;try{localStorage.setItem(key+':editing','1');sessionStorage.removeItem(key+':exited');}catch{}try{if(f.elements.remember.checked)localStorage.setItem(tokenKey,token);else localStorage.removeItem(tokenKey);}catch{message('授權只暫留於此頁，裝置無法記住 Token。');}f.elements.token.value='';d.close();if(legacyDraft&&!dirty){base=copy(legacyDraft.base);trip=mergeShared(legacyDraft.base,legacyDraft.trip,trip).trip;dirty=true;persist();await redraw();}controls();await refresh(true);}catch(e){f.querySelector('[role=status]').textContent=e.message;}finally{b.disabled=false;}};
+    d.querySelector('form').onsubmit=async e=>{e.preventDefault();const f=e.target;if(preview){token='preview';controls();notifyPreview(false);d.close();return;}const entered=(f.elements.token.value.trim()||remembered),b=f.querySelector('[type=submit]');if(!entered){f.querySelector('[role=status]').textContent=text('請先輸入 GitHub Token。','Enter your GitHub token first.');f.elements.token.focus();return;}b.disabled=true;
+      try{const response=await fetch('https://api.github.com/repos/'+config.repository,{headers:{Authorization:'Bearer '+entered,Accept:'application/vnd.github+json'},cache:'no-store',redirect:'error',signal:AbortSignal.timeout(25000)});if(!response.ok)throw Error('Token 驗證失敗，請檢查授權。');const repo=await response.json();if(!repo.permissions?.push)throw Error('這份授權沒有儲存庫寫入資格。');if(!saveAfterAuth){token=entered;try{localStorage.setItem(key+':editing','1');sessionStorage.removeItem(key+':exited');}catch{}}try{if(f.elements.remember.checked)localStorage.setItem(tokenKey,entered);else localStorage.removeItem(tokenKey);}catch{message('授權只暫留於此頁，裝置無法記住 Token。');}f.elements.token.value='';d.close();if(legacyDraft&&!dirty){base=copy(legacyDraft.base);trip=mergeShared(legacyDraft.base,legacyDraft.trip,trip).trip;dirty=true;persist();await redraw();}if(saveAfterAuth){await save(entered);return;}controls();await refresh(true);}catch(e){f.querySelector('[role=status]').textContent=e.message;}finally{b.disabled=false;}};
   }
   let taps=0,lastTap=0,lastTarget='';
   document.addEventListener('click',e=>{
@@ -352,7 +374,7 @@ export async function installSharedRuntime(config) {
     if(taps===5){taps=0;authorization();}
   },true);
   document.addEventListener('click',e=>{if(busy&&e.target.closest('.day-expense,.rrow,.expense-delete-btn,[data-pack-id]')){e.preventDefault();e.stopImmediatePropagation();}},true);
-  window.addEventListener('travel-preview-change',()=>{if(!token&&!preview)return;capture();dirty=true;persist();controls();});
+  window.addEventListener('travel-preview-change',()=>{capture();dirty=preview?true:hasChanges();persist();controls();});
   window.addEventListener('online',()=>refresh(true));document.addEventListener('visibilitychange',()=>refresh());window.addEventListener('focus',()=>refresh());
   window.addEventListener('beforeunload',e=>{if(dirty&&!preview){e.preventDefault();e.returnValue='';}});
   if(!preview)setInterval(()=>refresh(),60000);
