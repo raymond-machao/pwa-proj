@@ -20,12 +20,16 @@ export function installMobileShare({ tools, trip, baseline, readState }) {
       const url = URL.createObjectURL(file), link = document.createElement('a');
       link.href = url; link.download = filename; document.body.append(link); link.click(); link.remove();
       setTimeout(() => URL.revokeObjectURL(url), 60000);
-      alert(en ? 'MD downloaded. Send this file to your computer and choose Import mobile MD.' : '已下載 MD。請將此檔案傳到電腦，再選「匯入手機 MD」。');
+      alert(en ? 'Expense backup downloaded. Keep this file until synchronization is confirmed.' : '已下載記帳備份，確認同步完成前請保留此檔案。');
     } catch (error) {
       alert((en ? 'Unable to share: ' : '無法分享：') + error.message);
     } finally { busy = false; button.disabled = false; }
   }
   return function mount() {
-    // Disabled - PWA cloud and memory sync replaces manual mobile MD sharing
+    for(const page of document.querySelectorAll('.feature-page[id^="expenses-"]')){
+      if(page.querySelector('.mobile-share'))continue;
+      const button=document.createElement('button');button.type='button';button.className='mobile-share';button.dataset.language=page.id.endsWith('-en')?'en':'zh';
+      button.textContent=button.dataset.language==='en'?'Share expense backup':'分享記帳備份';button.onclick=()=>share(button);page.append(button);
+    }
   };
 }

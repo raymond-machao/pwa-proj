@@ -1068,6 +1068,8 @@ ${flightCss}</style>${appStyles}${style}<style>${itineraryLayoutCss}${mapGesture
   });
   const read = suffix => runtimeStorage.read(suffix);
   const write = (suffix, value) => runtimeStorage.write(suffix, value);
+  window.hasTravelDeviceExpenses = () => runtimeStorage.hasSaved(':expenses');
+  window.commitTravelExpenseMirror = expenses => runtimeStorage.write(':expenses', JSON.parse(JSON.stringify(expenses)));
   const mountMobileShare = (${installMobileShare.toString()})({ tools: transferTools, trip: transferTrip,
     baseline: () => ({ packing: INITIAL_PACKING, expenses: [...new Map([...read(":deleted-expenses"), ...initialExpenses].map(row => [row.id, row])).values()] }),
     readState: () => window.getTravelPreviewState() });
@@ -1841,7 +1843,7 @@ ${flightCss}</style>${appStyles}${style}<style>${itineraryLayoutCss}${mapGesture
     document.documentElement.lang = lang === "zh" ? "zh-Hant" : "en";
     bindPages();
     bindTransitModals();
-    bindPacking();
+    bindPacking(); mountMobileShare();
     fitTransitPlans();
     bindDayNav();
     bindCardNav(".subnav-references");
@@ -2120,7 +2122,7 @@ ${flightCss}</style>${appStyles}${style}<style>${itineraryLayoutCss}${mapGesture
   window.applyTravelSharedState = function(next) {
     syncSharedPacking(next);
     runtimeStorage.replace(':expenses', INITIAL_PREVIEW_STATE.expenses || next.expenses || []);
-    bindPacking();
+    bindPacking(); mountMobileShare();
     if(content.querySelector('.feature-page.active[id^="expenses-"]'))renderExpenseReport();
   };
   window.syncTravelLayout = () => itineraryLayout.sync();
@@ -2154,7 +2156,7 @@ ${flightCss}</style>${appStyles}${style}<style>${itineraryLayoutCss}${mapGesture
       updateTopNav(target); if (target.startsWith('expenses')) renderExpenseReport();
       itineraryLayout.sync(); window.scrollTo(0,0);
     });
-    bindTransitModals(); bindPacking(); bindDayNav(); bindCardNav('.subnav-references'); bindCardNav('.subnav-packing');
+    bindTransitModals(); bindPacking(); mountMobileShare(); bindDayNav(); bindCardNav('.subnav-references'); bindCardNav('.subnav-packing');
     bindImageLightbox(); bindSheetScrollbar();
     selectItineraryView(Math.min(selected, Math.max(1,next.days.length)));
     if (all) maps.find(m => m.getBoundingClientRect().width)?.querySelector('[data-map-scope="all"]')?.click();

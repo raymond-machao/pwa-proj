@@ -1,3 +1,4 @@
+import { expenseRecoveryBase } from '../domain/device-expense-recovery.js';
 import {referenceCategory, referenceSuggestions, categoryDisplayText} from '../domain/reference-categories.js';
 import {readAttachment} from '../domain/attachments.js';
 import { assertShared, createSharedClient, sharedProject, mapSignature, mergeShared } from '../domain/shared-trip.js';
@@ -16,7 +17,7 @@ export async function installSharedRuntime(config) {
     return new Promise(resolve => {
       const nextBaseline=copy(trip);
       const complete=success=>{if(success&&contentChanged)previewBaseline=nextBaseline;resolve(success);};
-      window.dispatchEvent(new CustomEvent('travel-shared-preview-change',{detail:{trip:copy(trip),baseline:copy(previewBaseline),editing:Boolean(token),contentChanged,complete}}));
+      window.dispatchEvent(new CustomEvent('travel-shared-preview-change',{detail:{trip:copy(trip),baseline:copy(previewBaseline),editing:Boolean(editing),contentChanged,complete}}));
       if(!window.__travelPreviewBridgeReady)complete(true);
     });
   };
@@ -68,9 +69,10 @@ export async function installSharedRuntime(config) {
   const identity = config.repository + ':' + config.branch + ':' + config.path + ':' + seed.tripId;
   const key = 'travel-shared:' + identity, tokenKey = key + ':token';
   const draftStorage=preview?null:createDeviceDraftStorage();
+  let initializing = true, editing = false, syncTimer, syncPaused = false, syncError = '', failures = 0;
   let token = '', base = copy(seed), trip = copy(seed), envelope = null, dirty = false, busy = false, lastRead = 0, applied = false, savedShared = false, legacyDraft = null;
   let reading=false,deferredSha=null,lastReadError='',storageError='',blockedDraft=false,blockedLegacy=false,baseUnknown=false,hadSharedCache=false;
-  if(preview)token=window.__travelPreviewEditing?"preview":"";
+  if(preview){token=window.__travelPreviewEditing?"preview":"";editing=Boolean(token);}
   function capture() {
     const state=window.getTravelPreviewState?.();
     if(!state)return;
@@ -84,7 +86,8 @@ export async function installSharedRuntime(config) {
   if(!preview)try {
     const isEditing = localStorage.getItem(key + ':editing') === '1';
     const exited = sessionStorage.getItem(key + ':exited') === '1';
-    token = (isEditing && !exited) ? (localStorage.getItem(tokenKey) || '') : '';
+    token = localStorage.getItem(tokenKey) || '';
+    editing = Boolean(token && isEditing && !exited);
     try { legacyDraft=unpackStorage(await draftStorage.read(key+':legacy')); }
     catch(e){blockedLegacy=true;storageError=e.message;}
     if(legacyDraft && (legacyDraft.base?.tripId!==seed.tripId || legacyDraft.trip?.tripId!==seed.tripId)){blockedLegacy=true;storageError='舊記帳草稿的旅程識別不符，原始資料已保留。';legacyDraft=null;}
@@ -112,24 +115,31 @@ export async function installSharedRuntime(config) {
     }
   } catch(e) {storageError=e.message;blockedDraft=true;}
   const personalState = window.getTravelPreviewState?.();
-  if(!preview && !savedShared && !hadSharedCache && !legacyDraft && !blockedLegacy && personalState && JSON.stringify(personalState.expenses)!==JSON.stringify(window.__travelPublishedPreviewState?.expenses)) {
-    const personalTrip=copy(seed);personalTrip.previewState={...personalTrip.previewState,expenses:personalState.expenses};
-    legacyDraft={base:copy(seed),trip:personalTrip};
-    try{await draftStorage.write(key+':legacy',packStorage(legacyDraft));}catch{storageError='裝置無法保存舊記帳草稿，關閉前請分享記帳與清單備份。';}
+  const normalizeExpenses = rows => (rows||[]).map(row=>createMobileTransferTools().expense(row,trip.settings?.homeCurrency));
+  // Preserve disagreements BEFORE any render or write can shadow the raw ledger.
+  if(!preview && !legacyDraft && !blockedDraft && !blockedLegacy && personalState && window.hasTravelDeviceExpenses?.()) {
+    const local=normalizeExpenses(personalState.expenses), current=normalizeExpenses(trip.previewState?.expenses);
+    if(JSON.stringify(local)!==JSON.stringify(current)) {
+      const personalTrip=copy(trip);personalTrip.previewState={...personalTrip.previewState,expenses:local};
+      const ancestor=copy(seed);
+      if(hadSharedCache)ancestor.previewState={...ancestor.previewState,expenses:expenseRecoveryBase(local,current)};
+      legacyDraft={base:ancestor,trip:personalTrip};
+      try{await draftStorage.write(key+':legacy',packStorage(legacyDraft));}catch{storageError='裝置尚未保存記帳，請保持此頁開啟。';}
+    }
   }
-  const applyLegacy = async () => {
+  const applyLegacy = async (allowMemory=false, captureCurrent=true) => {
     if(blockedDraft||blockedLegacy){message(storageError);return false;}
     if(!legacyDraft)return true;
-    capture();
+    if(captureCurrent)capture();
     const normalizeExpense=createMobileTransferTools().expense;
-    const expenses = value => ({previewState:{expenses:(value?.previewState?.expenses||[]).map(row=>normalizeExpense(row,trip.settings?.homeCurrency))}});
+    const expenses = value => ({previewState:{expenses:(value?.previewState?.expenses||[]).map(row=>row.recoveryUnknown?row:normalizeExpense(row,trip.settings?.homeCurrency))}});
     // Apply only the device's expense changes, including deletions. Concurrent
     // edits use the same explicit conflict choices as all other shared edits.
     const merged=await resolveSharedMerge(expenses(legacyDraft.base),expenses(legacyDraft.trip),expenses(trip),{reading:true});
-    if(!merged)return false;
+    if(!merged){await redraw();return false;}
     trip.previewState={...trip.previewState,expenses:merged.previewState.expenses};
     dirty=JSON.stringify(trip)!==JSON.stringify(base);
-    if(!await persist())return false;
+    if(!await persist()){if(allowMemory){await redraw();return true;}return false;}
     legacyDraft=null;
     try{await draftStorage.remove(key+':legacy');}catch{}
     await redraw();return true;
@@ -158,7 +168,7 @@ export async function installSharedRuntime(config) {
     if(preview)return true;
     if(blockedDraft){message(storageError);return false;}
     const snapshot=packStorage({seedSig,base,baseUnknown,trip:dirty?trip:null,dirty});
-    try{await draftStorage.write(key,snapshot);draftSaveFailed=false;return true;}
+    try{await draftStorage.write(key,snapshot);draftSaveFailed=false;if(!legacyDraft&&!blockedLegacy)window.commitTravelExpenseMirror?.(trip.previewState?.expenses||[]);return true;}
     catch{draftSaveFailed=true;message(en()?'This device could not save the draft. Keep this page open and share expenses & checklist as a backup.':'裝置無法保存草稿，請保持此頁開啟，先分享記帳與清單備份。');return false;}
   };
   const paths = { addDay:'M3 5h18v16H3ZM7 2v6M17 2v6M3 10h18M12 13v5M9.5 15.5h5', addStop:'M12 21s-7-6-7-12a7 7 0 0 1 14 0c0 6-7 12-7 12ZM12 6v6M9 9h6', add:'M12 5v14M5 12h14', edit:'m16 3 5 5-12 12-6 1 1-6Z M14 5l5 5', delete:'M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7', save:'M5 3h12l4 4v14H3V3ZM7 3v6h10V3M7 21v-8h10v8', refresh:'M20 7v5h-5M4 17v-5h5M19 12a7 7 0 0 0-12-5M5 12a7 7 0 0 0 12 5', up:'m6 14 6-6 6 6', down:'m6 10 6 6 6-6', check:'m5 12 5 5L20 7' };
@@ -173,7 +183,7 @@ export async function installSharedRuntime(config) {
     b.onclick=e=>{e.preventDefault();e.stopPropagation();if(!busy)action();}; return b;
   }
   function actions(host, row, list, edit, move = false) {
-    if (!host || !token) return;
+    if (!host || !editing) return;
     const bar=document.createElement('div');bar.className='shared-actions shared-row-actions';
     bar.append(button('edit',en()?'Edit':'編輯',()=>edit(row)),button('delete',en()?'Delete':'刪除',()=>{
       if(confirm(en()?'Delete this item?':'確定刪除這個項目？')) { capture();list.splice(list.indexOf(row),1);if(move)invalidateRoutes(list);if(list===trip.days){trip.startDate=trip.days.map(d=>d.date).filter(Boolean).sort()[0]||'';trip.endDate=trip.days.map(d=>d.date).filter(Boolean).sort().at(-1)||'';for(const e of trip.previewState?.expenses||[])if(e.day===row.id)e.day='day-0';}changed(); }
@@ -182,20 +192,28 @@ export async function installSharedRuntime(config) {
   }
   function guardReadonly() {
     window.__travelSharedReadonly=false;
-    document.documentElement.classList.toggle('shared-editing',Boolean(token));
+    document.documentElement.classList.toggle('shared-editing',Boolean(editing));
     document.querySelectorAll('[data-pack-id]').forEach(b=>b.disabled=busy);
     document.querySelectorAll('.day-expense').forEach(b=>b.hidden=false);
   }
-  function exitEditing() { token = ''; if (!preview) { try { localStorage.setItem(key + ':editing', '0'); sessionStorage.setItem(key + ':exited', '1'); } catch {} } notifyPreview(false); controls(); message(en() ? 'Exited editing mode' : '已結束編輯模式'); }
+  function exitEditing() { editing=false;if(preview)token = ''; if (!preview) { try { localStorage.setItem(key + ':editing', '0'); sessionStorage.setItem(key + ':exited', '1'); } catch {} } notifyPreview(false); controls(); message(en() ? 'Exited editing mode' : '已結束編輯模式'); }
   function controls() {
     document.querySelectorAll('.shared-actions,.shared-editor-bar,.shared-warning').forEach(n=>n.remove());
     guardReadonly();
+    if(!preview){
+      let indicator=document.querySelector('.shared-sync-status');
+      if(!indicator){indicator=document.createElement('button');indicator.className='shared-sync-status';indicator.type='button';indicator.style.cssText='display:block;margin:8px 0;border:0;background:transparent;color:#7b6754;font:inherit;font-size:12px';document.querySelector('.hero')?.append(indicator);}
+      const syncLabel=blockedDraft||blockedLegacy?'記帳資料待恢復':syncPaused?'同步衝突待處理':draftSaveFailed?'裝置保存失敗，更新已暫緩':!token?'記帳僅在此裝置・設定同步授權':busy?'同步中…':syncError?'連線失敗，將自動重試':dirty?'等待自動同步':'已同步';
+      const syncEnglish={'記帳資料待恢復':'Expense recovery needed','同步衝突待處理':'Resolve sync conflict','裝置保存失敗，更新已暫緩':'Device save failed; update paused','記帳僅在此裝置・設定同步授權':'Device only · Set up sync','同步中…':'Syncing…','連線失敗，將自動重試':'Connection failed; retrying automatically','等待自動同步':'Waiting to sync','已同步':'Synced'};
+      indicator.textContent=en()?syncEnglish[syncLabel]:syncLabel;
+      indicator.onclick=()=>{if(!token)authorization();else{syncPaused=false;scheduleSync(0);}};
+    }
     const stale = mapSignature(trip)!==mapSignature(seed);
     document.querySelectorAll('.trip-map-shell').forEach(shell=>shell.hidden=stale);
     if(stale && seed.settings?.showMap!==false) {
       const warning=document.createElement('p');warning.className='shared-warning';warning.textContent=en()?'Itinerary changed. Republish maps from the desktop; navigation links remain available.':'行程地點或順序已變更，地圖須由電腦重新發布；仍可使用外部導航。';document.querySelector('.hero')?.append(warning);
     }
-    if(!token){window.syncTravelLayout?.();return;}
+    if(!editing){window.syncTravelLayout?.();return;}
     const bar=document.createElement('div');bar.className='shared-editor-bar';
     bar.append(button('save',preview?(en()?'Save project':'儲存專案'):(en()?'Save shared trip':'儲存共享旅程'),save));bar.firstChild.classList.toggle('shared-dirty',dirty);
     bar.append(button('check', en() ? 'Done editing' : '完成編輯', exitEditing));
@@ -230,7 +248,7 @@ export async function installSharedRuntime(config) {
   }
 
   function bindSharedDrag() {
-    if(!token) return;
+    if(!editing) return;
     const items = document.querySelectorAll('[data-shared-note], [data-shared-reference], .pack-item, article.stop[id^="preview-stop-"]');
     items.forEach(el => {
       let timer = null, startX = 0, startY = 0, dragging = false;
@@ -346,7 +364,7 @@ export async function installSharedRuntime(config) {
     window.__travelSharedActivityAt=Date.now();applied=true;controls();
   }
   function invalidateRoutes(stops) { for(const stop of stops)stop.nextLeg={...newStop().nextLeg,mode:stop.nextLeg?.mode||''}; }
-  async function changed() { dirty=true;setBusy(true);try{const stored=await persist();await redraw();const applied=await notifyPreview(true);if(preview&&!applied){message(en()?'Preview draft kept; desktop changes were not applied.':'預覽草稿仍保留，尚未套用到左側。');return;}if(!stored)return;message(preview?(en()?'Preview changes are in desktop memory. Save the project explicitly.':'預覽修改已同步到左側，按外側「儲存專案」才會寫檔。'):(en()?'Changes saved on this device. Tap Save to share.':'變更已暫存於此裝置，按「儲存共享旅程」才會同步。'));}catch(e){message('草稿已保留，畫面更新失敗：'+e.message);}finally{setBusy(false);} }
+  async function changed() { dirty=true;setBusy(true);try{const stored=await persist();await redraw();const applied=await notifyPreview(true);if(preview&&!applied){message(en()?'Preview draft kept; desktop changes were not applied.':'預覽草稿仍保留，尚未套用到左側。');return;}if(!stored)return;message(preview?(en()?'Preview changes are in desktop memory. Save the project explicitly.':'預覽修改已同步到左側，按外側「儲存專案」才會寫檔。'):(en()?'Changes saved on this device. Syncing automatically.':'變更已暫存於此裝置，將自動同步。'));}catch(e){message('草稿已保留，畫面更新失敗：'+e.message);}finally{setBusy(false);scheduleSync();} }
   function form(title, fields, initial, submit, attachment=false) {
     const dialog=document.createElement('dialog');dialog.className='shared-dialog';const h=document.createElement('h2');h.textContent=t(title);dialog.append(h);
     const f=document.createElement('form');dialog.append(f);const inputs={};const comboboxBindings=[];
@@ -389,8 +407,8 @@ export async function installSharedRuntime(config) {
     },true);
   }
   async function refresh(manual=false) {
-    if(preview)return;
-    if(busy||reading||document.hidden||document.querySelector('.shared-dialog[open],#global-expense-modal.active')||(!manual&&Date.now()-lastRead<(token?120000:300000)))return;
+    if(preview||blockedDraft||blockedLegacy||syncPaused)return;
+    if(busy||reading||document.hidden||document.querySelector('.shared-dialog[open],#global-expense-modal.active')||(!manual&&Date.now()-lastRead<(token?15000:300000)))return;
     reading=true;lastRead=Date.now();let locked=false;
     const lock=value=>{document.querySelectorAll('#mobile-content,.hero,.feature-nav').forEach(node=>node.inert=value);};
     try{
@@ -401,36 +419,50 @@ export async function installSharedRuntime(config) {
       window.__travelSharedReadAt=Date.now();
       if(!manual&&deferredSha===latest.sha)return;
       const latestSeedRaw=JSON.stringify(latest.value.seed);
-      if(hashText(latestSeedRaw)!==seedSig && JSON.stringify(latest.value.trip)===latestSeedRaw){if(!applied){window.applyTravelSharedState?.(trip);applied=true;}return;}
-      if(JSON.stringify(base)===JSON.stringify(latest.value.trip)){if(!applied){window.applyTravelSharedState?.(trip);applied=true;}return;}
+      if(hashText(latestSeedRaw)!==seedSig && JSON.stringify(latest.value.trip)===latestSeedRaw){if(!applied&&!legacyDraft){window.applyTravelSharedState?.(trip);applied=true;}return;}
+      if(JSON.stringify(base)===JSON.stringify(latest.value.trip)){if(!applied&&!legacyDraft){window.applyTravelSharedState?.(trip);applied=true;}return;}
       if(!dirty){
+        locked=true;lock(true);setBusy(true);
         const changed=JSON.stringify(trip)!==JSON.stringify(latest.value.trip);
         base=copy(latest.value.trip);baseUnknown=false;trip=copy(latest.value.trip);dirty=false;deferredSha=null;await persist();
-        if(changed)await redraw();else{if(!applied){window.applyTravelSharedState?.(trip);applied=true;}controls();}
+        if(changed&&!legacyDraft)await redraw();else{if(!applied&&!legacyDraft){window.applyTravelSharedState?.(trip);applied=true;}controls();}
         return;
       }
-      capture();
+      if(!legacyDraft)capture();
       setBusy(true);locked=true;lock(true);message(en()?'Shared changes found. Updating and merging…':'發現共享變更，正在更新與合併…');
       const merged=await resolveSharedMerge(base,trip,latest.value.trip,{reading:true});
-      if(!merged){deferredSha=latest.sha;message(en()?'Update postponed. Your draft is kept; Save will check again.':'已暫緩共享更新，草稿仍保留；按儲存會再次核對。');return;}
+      if(!merged){syncPaused=true;deferredSha=latest.sha;message(en()?'Update postponed. Your draft is kept; Save will check again.':'已暫緩共享更新，草稿仍保留；按儲存會再次核對。');return;}
       const changed=JSON.stringify(trip)!==JSON.stringify(merged);base=copy(latest.value.trip);baseUnknown=false;trip=copy(merged);dirty=JSON.stringify(trip)!==JSON.stringify(base);deferredSha=null;await persist();
-      if(changed)await redraw();else controls();
+      if(changed&&!legacyDraft)await redraw();else controls();
       message(en()?'Shared changes merged. Your unsaved edits are kept.':'共享更新已合併，自己的未儲存修改仍保留。');
-    }catch(e){const reason=navigator.onLine?e.message:'目前離線，保留裝置上的資料。';if(lastReadError!==reason){lastReadError=reason;message(reason);}}finally{reading=false;if(locked){lock(false);setBusy(false);}}
+    }catch(e){const reason=navigator.onLine?e.message:'目前離線，保留裝置上的資料。';if(lastReadError!==reason){lastReadError=reason;message(reason);}}finally{reading=false;if(locked){lock(false);setBusy(false);}scheduleSync();}
+  }
+  function scheduleSync(delay=1200) {
+    if(preview||!token||syncPaused||blockedDraft||blockedLegacy||(!dirty&&!legacyDraft))return;
+    clearTimeout(syncTimer);
+    syncTimer=setTimeout(async()=>{
+      syncTimer=null;
+      if(!token||syncPaused||blockedDraft||blockedLegacy||(!dirty&&!legacyDraft))return;
+      if(initializing||busy||reading||document.hidden||document.querySelector('.shared-dialog[open],#global-expense-modal.active')){scheduleSync(1500);return;}
+      if(!navigator.onLine){scheduleSync(15000);return;}
+      await save();
+    },delay);
   }
   async function save() {
-    if(busy||!token)return;capture();if(!preview){setBusy(true);try{if(!await applyLegacy())return;}finally{setBusy(false);}}if(preview){setBusy(true);try{if(!await notifyPreview(true))return;const saved=await new Promise(resolve=>window.dispatchEvent(new CustomEvent('travel-shared-preview-save',{detail:{complete:resolve}})));if(saved){dirty=false;controls();message(en()?'Project saved':'專案已儲存');}}finally{setBusy(false);}return;}dirty=true;setBusy(true);await persist();
+    if(reading)return;
+    syncPaused=false;
+    if(busy||!token)return;capture();if(!preview){setBusy(true);try{if(!await applyLegacy(true)){syncPaused=true;return;}}finally{setBusy(false);}}if(preview){setBusy(true);try{if(!await notifyPreview(true))return;const saved=await new Promise(resolve=>window.dispatchEvent(new CustomEvent('travel-shared-preview-save',{detail:{complete:resolve}})));if(saved){dirty=false;controls();message(en()?'Project saved':'專案已儲存');}}finally{setBusy(false);}return;}dirty=true;setBusy(true);await persist();
     try {
       let candidate=copy(trip), ancestor=copy(base);
       for(let attempt=0;attempt<3;attempt++){
         const latest=await client.read();assertShared(latest.value,seed.tripId);
-        const merged=await resolveSharedMerge(ancestor,candidate,latest.value.trip);if(!merged){message('已取消，草稿仍保留。');return;}
+        const merged=await resolveSharedMerge(ancestor,candidate,latest.value.trip);if(!merged){syncPaused=true;message('同步衝突尚未處理，兩份資料均保留。');return;}
         const next={...latest.value,trip:sharedProject(merged),updatedAt:new Date().toISOString()};
-        try {await client.write(next,latest.sha);base=copy(next.trip);baseUnknown=false;trip=copy(base);envelope=next;dirty=false;deferredSha=null;legacyDraft=null;try{await draftStorage.remove(key+':legacy');}catch{}await persist();await redraw();message(en()?'Shared trip saved':'共享旅程已儲存，其他人連網更新後可看到');return;}
+        try {await client.write(next,latest.sha);base=copy(next.trip);baseUnknown=false;trip=copy(base);envelope=next;dirty=false;deferredSha=null;legacyDraft=null;try{await draftStorage.remove(key+':legacy');}catch{}await persist();await redraw();syncError='';failures=0;message(en()?'Synced':'已同步');return;}
         catch(e){if(e.status!==409&&e.status!==422)throw e;ancestor=copy(latest.value.trip);candidate=merged;}
       }
       throw Error('其他人持續修改，請稍後再按儲存；草稿仍保留。');
-    }catch(e){message(e.message+' 草稿仍保留，可重試。');}finally{setBusy(false);controls();}
+    }catch(e){syncError=e.message;failures++;message(e.message+' 記帳仍保留，連線恢復後會自動重試。');}finally{setBusy(false);controls();scheduleSync(Math.min(60000,5000*2**Math.min(failures,4)));}
   }
   function authorization() {
     if(document.querySelector('.shared-dialog[open]'))return;
@@ -441,9 +473,9 @@ export async function installSharedRuntime(config) {
     document.body.append(d);d.showModal();d.onclose=()=>{d.querySelector('[name=token]').value='';d.remove();};
     d.querySelector('[data-close]').onclick=d.querySelector('[data-cancel]').onclick=()=>d.close();
     d.querySelector('[data-remove]').onclick=()=>{exitEditing();d.close();};
-    const forgetBtn=d.querySelector('[data-forget]');if(forgetBtn)forgetBtn.onclick=()=>{try{localStorage.removeItem(tokenKey);localStorage.setItem(key+':editing','0');}catch{}exitEditing();d.close();message(text('已清除本機記住的授權','Remembered token cleared'));};
-    d.querySelector('form').onsubmit=async e=>{e.preventDefault();const f=e.target;if(preview){token='preview';controls();notifyPreview(false);d.close();return;}const entered=(f.elements.token.value.trim()||remembered),b=f.querySelector('[type=submit]');if(!entered){f.querySelector('[role=status]').textContent=text('請先輸入 GitHub Token。','Enter your GitHub token first.');f.elements.token.focus();return;}b.disabled=true;
-      try{const response=await fetch('https://api.github.com/repos/'+config.repository,{headers:{Authorization:'Bearer '+entered,Accept:'application/vnd.github+json'},cache:'no-store',redirect:'error',signal:AbortSignal.timeout(25000)});if(!response.ok)throw Error('Token 驗證失敗，請檢查授權。');const repo=await response.json();if(!repo.permissions?.push)throw Error('這份授權沒有儲存庫寫入資格。');token=entered;try{localStorage.setItem(key+':editing','1');sessionStorage.removeItem(key+':exited');}catch{}try{if(f.elements.remember.checked)localStorage.setItem(tokenKey,token);else localStorage.removeItem(tokenKey);}catch{message('授權只暫留於此頁，裝置無法記住 Token。');}f.elements.token.value='';d.close();setBusy(true);let merged=false;try{merged=await applyLegacy();}finally{setBusy(false);}controls();if(merged)await refresh(true);}catch(e){f.querySelector('[role=status]').textContent=e.message;}finally{b.disabled=false;}};
+    const forgetBtn=d.querySelector('[data-forget]');if(forgetBtn)forgetBtn.onclick=()=>{token='';clearTimeout(syncTimer);try{localStorage.removeItem(tokenKey);localStorage.setItem(key+':editing','0');}catch{}exitEditing();d.close();message(text('已清除本機記住的授權','Remembered token cleared'));};
+    d.querySelector('form').onsubmit=async e=>{e.preventDefault();const f=e.target;if(preview){token='preview';editing=true;controls();notifyPreview(false);d.close();return;}const entered=(f.elements.token.value.trim()||remembered),b=f.querySelector('[type=submit]');if(!entered){f.querySelector('[role=status]').textContent=text('請先輸入 GitHub Token。','Enter your GitHub token first.');f.elements.token.focus();return;}b.disabled=true;
+      try{const response=await fetch('https://api.github.com/repos/'+config.repository,{headers:{Authorization:'Bearer '+entered,Accept:'application/vnd.github+json'},cache:'no-store',redirect:'error',signal:AbortSignal.timeout(25000)});if(!response.ok)throw Error('Token 驗證失敗，請檢查授權。');const repo=await response.json();if(!repo.permissions?.push)throw Error('這份授權沒有儲存庫寫入資格。');token=entered;editing=true;syncPaused=false;try{localStorage.setItem(key+':editing','1');sessionStorage.removeItem(key+':exited');}catch{}try{if(f.elements.remember.checked)localStorage.setItem(tokenKey,token);else localStorage.removeItem(tokenKey);}catch{message('授權只暫留於此頁，裝置無法記住 Token。');}f.elements.token.value='';d.close();setBusy(true);let merged=false;try{merged=await applyLegacy();}finally{setBusy(false);}controls();if(merged)await refresh(true);else syncPaused=true;controls();scheduleSync();}catch(e){f.querySelector('[role=status]').textContent=e.message;}finally{b.disabled=false;}};
   }
   let taps=0,lastTap=0,lastTarget='';
   document.addEventListener('click',e=>{
@@ -461,17 +493,17 @@ export async function installSharedRuntime(config) {
     const before=JSON.stringify(trip);
     capture();
     if(JSON.stringify(trip)===before)return;
-    dirty=JSON.stringify(trip)!==JSON.stringify(base);await persist();controls();
+    dirty=JSON.stringify(trip)!==JSON.stringify(base);syncPaused=false;await persist();controls();scheduleSync();
   });
-  window.addEventListener('online',()=>refresh(true));document.addEventListener('visibilitychange',()=>refresh());window.addEventListener('focus',()=>refresh());
-  window.addEventListener('beforeunload',e=>{if(dirty&&!preview){e.preventDefault();e.returnValue='';}});
-  if(!preview)setInterval(()=>refresh(),60000);
-  window.__travelSharedController={save,refresh,authorization,get trip(){return copy(trip);},get dirty(){return dirty;},get updating(){return busy||reading||Boolean(draftStorage?.pending);},get legacyPending(){return Boolean(legacyDraft)||blockedLegacy||blockedDraft||draftSaveFailed;},projectSaved(){if(preview){dirty=false;controls();}}};
+  window.addEventListener('online',()=>{failures=0;scheduleSync(0);refresh(true);});document.addEventListener('visibilitychange',()=>refresh());window.addEventListener('focus',()=>refresh());
+  window.addEventListener('beforeunload',e=>{if((dirty||legacyDraft||draftSaveFailed)&&!preview){e.preventDefault();e.returnValue='';}});
+  if(!preview)setInterval(()=>{if(draftSaveFailed&&!busy&&!reading)persist().then(()=>controls());if(dirty||legacyDraft){if(!syncTimer)scheduleSync(0);}else refresh();},5000);
+  window.__travelSharedController={save,refresh,authorization,get syncState(){return blockedDraft||blockedLegacy?'recovery':syncPaused?'conflict':draftSaveFailed?'storage-error':!token?'authorization':busy?'syncing':syncError?'retrying':dirty?'pending':'synced';},get trip(){return copy(trip);},get dirty(){return dirty;},get updating(){return initializing||busy||reading||Boolean(draftStorage?.pending);},get legacyPending(){return Boolean(legacyDraft)||blockedLegacy||blockedDraft||draftSaveFailed;},projectSaved(){if(preview){dirty=false;controls();}}};
   await persist();
-  if(JSON.stringify(trip)!==JSON.stringify(seed))await redraw();else controls();
+  if(!legacyDraft&&JSON.stringify(trip)!==JSON.stringify(seed))await redraw();else controls();
   if(storageError)message(storageError);
-  if(token&&legacyDraft){setBusy(true);try{if(!await applyLegacy())return;}finally{setBusy(false);}}
-  await refresh(true);
+  if(legacyDraft){await refresh(true);setBusy(true);try{if(!await applyLegacy(true,false)){syncPaused=true;initializing=false;controls();return;}}finally{setBusy(false);}}
+  await refresh(true);initializing=false;controls();scheduleSync();
 }
 
 if(document.querySelector('meta[name="travel-pwa"]')) {
