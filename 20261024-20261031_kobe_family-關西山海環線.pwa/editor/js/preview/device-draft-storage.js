@@ -38,10 +38,10 @@ export function createDeviceDraftStorage({database=()=>indexedDB,legacyStorage=(
     get pending(){return pending>0;},
     async read(key) {
       await queue;
-      try {
-        const value=await transaction('readonly',store=>store.get(key));
-        if(value!==undefined)return value;
-      }catch { /* Older local drafts remain readable if IndexedDB is unavailable. */ }
+      // A read failure is not an absent draft. Propagate it so the caller
+      // cannot overwrite an existing database snapshot it has not read.
+      const value=await transaction('readonly',store=>store.get(key));
+      if(value!==undefined)return value;
       return legacyStorage().getItem(key);
     },
     write,
