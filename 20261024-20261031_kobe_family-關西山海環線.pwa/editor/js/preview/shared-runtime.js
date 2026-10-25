@@ -69,6 +69,7 @@ export async function installSharedRuntime(config) {
   const identity = config.repository + ':' + config.branch + ':' + config.path + ':' + seed.tripId;
   const key = 'travel-shared:' + identity, tokenKey = key + ':token';
   const draftStorage=preview?null:createDeviceDraftStorage();
+  let deviceRecovery=false, recoveryCandidates=[], recoveryIndex=0, cachedDeviceTrip=null;
   let initializing = true, editing = false, syncTimer, syncPaused = false, syncError = '', failures = 0;
   let token = '', base = copy(seed), trip = copy(seed), envelope = null, dirty = false, busy = false, lastRead = 0, applied = false, savedShared = false, legacyDraft = null;
   let reading=false,deferredSha=null,lastReadError='',storageError='',blockedDraft=false,blockedLegacy=false,baseUnknown=false,hadSharedCache=false;
@@ -97,7 +98,9 @@ export async function installSharedRuntime(config) {
       const header=raw?JSON.parse(raw):null;
       // A clean cache from an old release is disposable even when its old
       // attachment references cannot be decoded with the current seed.
-      saved=header && !header.dirty && header.seedSig!==seedSig ? null : unpackStorage(raw);
+      saved=unpackStorage(raw);
+      const cached=saved?.trip||saved?.base;
+      if(cached?.tripId===seed.tripId)cachedDeviceTrip=copy(cached);
     }
     catch(e){blockedDraft=true;storageError=e.message;}
     const sameSeed=saved?.seedSig===seedSig;
@@ -124,7 +127,25 @@ export async function installSharedRuntime(config) {
       const ancestor=copy(seed);
       if(hadSharedCache)ancestor.previewState={...ancestor.previewState,expenses:expenseRecoveryBase(local,current)};
       legacyDraft={base:ancestor,trip:personalTrip};
-      try{await draftStorage.write(key+':legacy',packStorage(legacyDraft));}catch{storageError='裝置尚未保存記帳，請保持此頁開啟。';}
+      // Recovery starts read-only. Keep the original stores untouched.
+    }
+  }
+  if(!preview){
+    const addCandidate=(source,rows)=>{
+      if(!Array.isArray(rows))return;
+      const normalized=JSON.stringify(normalizeExpenses(rows));
+      if(!recoveryCandidates.some(item=>item.normalized===normalized))recoveryCandidates.push({source,expenses:copy(rows),normalized});
+    };
+    if(window.hasTravelDeviceExpenses?.())addCandidate('手機記帳暫存',personalState?.expenses);
+    addCandidate('手機共享草稿',cachedDeviceTrip?.previewState?.expenses);
+    addCandidate('手機舊版備份',legacyDraft?.trip?.previewState?.expenses);
+    deviceRecovery=Boolean(legacyDraft)||recoveryCandidates.length>1||Boolean(cachedDeviceTrip&&!savedShared&&JSON.stringify(normalizeExpenses(cachedDeviceTrip.previewState?.expenses))!==JSON.stringify(normalizeExpenses(seed.previewState?.expenses)));
+    if(deviceRecovery){
+      // Prefer the phone's ledger, then another nonempty device snapshot.
+      // Never infer that an empty/cloud snapshot deleted the device's records.
+      recoveryIndex=Math.max(0,recoveryCandidates.findIndex(item=>item.expenses.length));
+      if(recoveryCandidates[recoveryIndex])trip.previewState={...trip.previewState,expenses:copy(recoveryCandidates[recoveryIndex].expenses)};
+      syncPaused=true;
     }
   }
   const applyLegacy = async (allowMemory=false, captureCurrent=true) => {
@@ -166,6 +187,7 @@ export async function installSharedRuntime(config) {
   let draftSaveFailed=false;
   const persist = async () => {
     if(preview)return true;
+    if(deviceRecovery)return false;
     if(blockedDraft){message(storageError);return false;}
     const snapshot=packStorage({seedSig,base,baseUnknown,trip:dirty?trip:null,dirty});
     try{await draftStorage.write(key,snapshot);draftSaveFailed=false;if(!legacyDraft&&!blockedLegacy)window.commitTravelExpenseMirror?.(trip.previewState?.expenses||[]);return true;}
@@ -194,26 +216,37 @@ export async function installSharedRuntime(config) {
     window.__travelSharedReadonly=false;
     document.documentElement.classList.toggle('shared-editing',Boolean(editing));
     document.querySelectorAll('[data-pack-id]').forEach(b=>b.disabled=busy);
-    document.querySelectorAll('.day-expense').forEach(b=>b.hidden=false);
+    document.querySelectorAll('.day-expense').forEach(b=>{b.hidden=false;b.disabled=deviceRecovery;});
   }
   function exitEditing() { editing=false;if(preview)token = ''; if (!preview) { try { localStorage.setItem(key + ':editing', '0'); sessionStorage.setItem(key + ':exited', '1'); } catch {} } notifyPreview(false); controls(); message(en() ? 'Exited editing mode' : '已結束編輯模式'); }
   function controls() {
-    document.querySelectorAll('.shared-actions,.shared-editor-bar,.shared-warning').forEach(n=>n.remove());
+    document.querySelectorAll('.shared-actions,.shared-editor-bar,.shared-warning,.device-recovery-panel').forEach(n=>n.remove());
     guardReadonly();
     if(!preview){
       let indicator=document.querySelector('.shared-sync-status');
       if(!indicator){indicator=document.createElement('button');indicator.className='shared-sync-status';indicator.type='button';indicator.style.cssText='display:block;margin:8px 0;border:0;background:transparent;color:#7b6754;font:inherit;font-size:12px';document.querySelector('.hero')?.append(indicator);}
-      const syncLabel=blockedDraft||blockedLegacy?'記帳資料待恢復':syncPaused?'同步衝突待處理':draftSaveFailed?'裝置保存失敗，更新已暫緩':!token?'記帳僅在此裝置・設定同步授權':busy?'同步中…':syncError?'連線失敗，將自動重試':dirty?'等待自動同步':'已同步';
-      const syncEnglish={'記帳資料待恢復':'Expense recovery needed','同步衝突待處理':'Resolve sync conflict','裝置保存失敗，更新已暫緩':'Device save failed; update paused','記帳僅在此裝置・設定同步授權':'Device only · Set up sync','同步中…':'Syncing…','連線失敗，將自動重試':'Connection failed; retrying automatically','等待自動同步':'Waiting to sync','已同步':'Synced'};
+      const syncLabel=deviceRecovery?'目前顯示手機暫存・雲端同步已暫停':blockedDraft||blockedLegacy?'記帳資料待恢復':syncPaused?'同步衝突待處理':draftSaveFailed?'裝置保存失敗，更新已暫緩':!token?'記帳僅在此裝置・設定同步授權':busy?'同步中…':syncError?'連線失敗，將自動重試':dirty?'等待自動同步':'已同步';
+      const syncEnglish={'目前顯示手機暫存・雲端同步已暫停':'Showing device records · Sync paused','記帳資料待恢復':'Expense recovery needed','同步衝突待處理':'Resolve sync conflict','裝置保存失敗，更新已暫緩':'Device save failed; update paused','記帳僅在此裝置・設定同步授權':'Device only · Set up sync','同步中…':'Syncing…','連線失敗，將自動重試':'Connection failed; retrying automatically','等待自動同步':'Waiting to sync','已同步':'Synced'};
       indicator.textContent=en()?syncEnglish[syncLabel]:syncLabel;
-      indicator.onclick=()=>{if(!token)authorization();else{syncPaused=false;scheduleSync(0);}};
+      indicator.onclick=()=>{if(deviceRecovery){document.querySelector('.device-recovery-panel')?.scrollIntoView({block:'center'});return;}if(!token)authorization();else{syncPaused=false;scheduleSync(0);}};
+    }
+    if(deviceRecovery){
+      const panel=document.createElement('div');panel.className='device-recovery-panel';panel.style.cssText='padding:8px 0;font-size:12px;color:#7b6754';
+      const help=document.createElement('p');help.textContent=en()?'Device records are shown first. Sync and updates are paused; original copies are kept.':'先顯示手機記帳。同步與更新已暫停，原始暫存均保留。';panel.append(help);
+      if(recoveryCandidates.length>1){
+        const select=document.createElement('select');select.setAttribute('aria-label',en()?'Device record version':'手機暫存版本');
+        recoveryCandidates.forEach((item,index)=>{const option=document.createElement('option');option.value=index;option.textContent=item.source+'（'+item.expenses.length+'）';option.selected=index===recoveryIndex;select.append(option);});
+        select.onchange=async()=>{recoveryIndex=Number(select.value);trip.previewState={...trip.previewState,expenses:copy(recoveryCandidates[recoveryIndex].expenses)};await redraw();};panel.append(select);
+      }
+      const backup=document.createElement('button');backup.type='button';backup.textContent=en()?'Download all device expense copies':'下載全部手機記帳備份';
+      backup.onclick=()=>{const data={format:'travel-device-expense-recovery-v1',tripId:seed.tripId,capturedAt:new Date().toISOString(),copies:recoveryCandidates.map(({source,expenses})=>({source,expenses}))};const url=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));const link=document.createElement('a');link.href=url;link.download='travel-device-expenses-backup.json';document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),60000);};panel.append(backup);document.querySelector('.hero')?.append(panel);
     }
     const stale = mapSignature(trip)!==mapSignature(seed);
     document.querySelectorAll('.trip-map-shell').forEach(shell=>shell.hidden=stale);
     if(stale && seed.settings?.showMap!==false) {
       const warning=document.createElement('p');warning.className='shared-warning';warning.textContent=en()?'Itinerary changed. Republish maps from the desktop; navigation links remain available.':'行程地點或順序已變更，地圖須由電腦重新發布；仍可使用外部導航。';document.querySelector('.hero')?.append(warning);
     }
-    if(!editing){window.syncTravelLayout?.();return;}
+    if(!editing||deviceRecovery){window.syncTravelLayout?.();return;}
     const bar=document.createElement('div');bar.className='shared-editor-bar';
     bar.append(button('save',preview?(en()?'Save project':'儲存專案'):(en()?'Save shared trip':'儲存共享旅程'),save));bar.firstChild.classList.toggle('shared-dirty',dirty);
     bar.append(button('check', en() ? 'Done editing' : '完成編輯', exitEditing));
@@ -407,7 +440,7 @@ export async function installSharedRuntime(config) {
     },true);
   }
   async function refresh(manual=false) {
-    if(preview||blockedDraft||blockedLegacy||syncPaused)return;
+    if(preview||deviceRecovery||blockedDraft||blockedLegacy||syncPaused)return;
     if(busy||reading||document.hidden||document.querySelector('.shared-dialog[open],#global-expense-modal.active')||(!manual&&Date.now()-lastRead<(token?15000:300000)))return;
     reading=true;lastRead=Date.now();let locked=false;
     const lock=value=>{document.querySelectorAll('#mobile-content,.hero,.feature-nav').forEach(node=>node.inert=value);};
@@ -438,17 +471,18 @@ export async function installSharedRuntime(config) {
     }catch(e){const reason=navigator.onLine?e.message:'目前離線，保留裝置上的資料。';if(lastReadError!==reason){lastReadError=reason;message(reason);}}finally{reading=false;if(locked){lock(false);setBusy(false);}scheduleSync();}
   }
   function scheduleSync(delay=1200) {
-    if(preview||!token||syncPaused||blockedDraft||blockedLegacy||(!dirty&&!legacyDraft))return;
+    if(preview||deviceRecovery||!token||syncPaused||blockedDraft||blockedLegacy||(!dirty&&!legacyDraft))return;
     clearTimeout(syncTimer);
     syncTimer=setTimeout(async()=>{
       syncTimer=null;
-      if(!token||syncPaused||blockedDraft||blockedLegacy||(!dirty&&!legacyDraft))return;
+      if(deviceRecovery||!token||syncPaused||blockedDraft||blockedLegacy||(!dirty&&!legacyDraft))return;
       if(initializing||busy||reading||document.hidden||document.querySelector('.shared-dialog[open],#global-expense-modal.active')){scheduleSync(1500);return;}
       if(!navigator.onLine){scheduleSync(15000);return;}
       await save();
     },delay);
   }
   async function save() {
+    if(deviceRecovery){message(en()?'Device recovery: original records are kept; sync is paused.':'目前先保留手機記帳，尚未恢復雲端同步。');return;}
     if(reading)return;
     syncPaused=false;
     if(busy||!token)return;capture();if(!preview){setBusy(true);try{if(!await applyLegacy(true)){syncPaused=true;return;}}finally{setBusy(false);}}if(preview){setBusy(true);try{if(!await notifyPreview(true))return;const saved=await new Promise(resolve=>window.dispatchEvent(new CustomEvent('travel-shared-preview-save',{detail:{complete:resolve}})));if(saved){dirty=false;controls();message(en()?'Project saved':'專案已儲存');}}finally{setBusy(false);}return;}dirty=true;setBusy(true);await persist();
@@ -465,6 +499,7 @@ export async function installSharedRuntime(config) {
     }catch(e){syncError=e.message;failures++;message(e.message+' 記帳仍保留，連線恢復後會自動重試。');}finally{setBusy(false);controls();scheduleSync(Math.min(60000,5000*2**Math.min(failures,4)));}
   }
   function authorization() {
+    if(deviceRecovery){message('目前先顯示手機暫存，請先保留記帳備份。');return;}
     if(document.querySelector('.shared-dialog[open]'))return;
     const d=document.createElement('dialog');d.className='shared-dialog shared-auth';
     const text=(zh,english)=>en()?english:zh;
@@ -486,8 +521,9 @@ export async function installSharedRuntime(config) {
     const now=Date.now();taps=target===lastTarget&&now-lastTap<1500?taps+1:1;lastTarget=target;lastTap=now;
     if(taps===5){taps=0;authorization();}
   },true);
-  document.addEventListener('click',e=>{if(busy&&e.target.closest('.day-expense,.rrow,.expense-delete-btn,[data-pack-id]')){e.preventDefault();e.stopImmediatePropagation();}},true);
+  document.addEventListener('click',e=>{if((busy||deviceRecovery)&&e.target.closest('.day-expense,.rrow,.expense-delete-btn,[data-pack-id]')){e.preventDefault();e.stopImmediatePropagation();}},true);
   window.addEventListener('travel-preview-change',async()=>{
+    if(deviceRecovery)return;
     // Expenses are editable before authorization too. Keep that device draft
     // before a refresh, authorization, or reload can replace the rendered state.
     const before=JSON.stringify(trip);
@@ -498,7 +534,8 @@ export async function installSharedRuntime(config) {
   window.addEventListener('online',()=>{failures=0;scheduleSync(0);refresh(true);});document.addEventListener('visibilitychange',()=>refresh());window.addEventListener('focus',()=>refresh());
   window.addEventListener('beforeunload',e=>{if((dirty||legacyDraft||draftSaveFailed)&&!preview){e.preventDefault();e.returnValue='';}});
   if(!preview)setInterval(()=>{if(draftSaveFailed&&!busy&&!reading)persist().then(()=>controls());if(dirty||legacyDraft){if(!syncTimer)scheduleSync(0);}else refresh();},5000);
-  window.__travelSharedController={save,refresh,authorization,get syncState(){return blockedDraft||blockedLegacy?'recovery':syncPaused?'conflict':draftSaveFailed?'storage-error':!token?'authorization':busy?'syncing':syncError?'retrying':dirty?'pending':'synced';},get trip(){return copy(trip);},get dirty(){return dirty;},get updating(){return initializing||busy||reading||Boolean(draftStorage?.pending);},get legacyPending(){return Boolean(legacyDraft)||blockedLegacy||blockedDraft||draftSaveFailed;},projectSaved(){if(preview){dirty=false;controls();}}};
+  window.__travelSharedController={save,refresh,authorization,get syncState(){return deviceRecovery?'device-recovery':blockedDraft||blockedLegacy?'recovery':syncPaused?'conflict':draftSaveFailed?'storage-error':!token?'authorization':busy?'syncing':syncError?'retrying':dirty?'pending':'synced';},get trip(){return copy(trip);},get dirty(){return dirty;},get updating(){return initializing||busy||reading||Boolean(draftStorage?.pending);},get legacyPending(){return deviceRecovery||Boolean(legacyDraft)||blockedLegacy||blockedDraft||draftSaveFailed;},projectSaved(){if(preview){dirty=false;controls();}}};
+  if(deviceRecovery){await redraw();initializing=false;controls();return;}
   await persist();
   if(!legacyDraft&&JSON.stringify(trip)!==JSON.stringify(seed))await redraw();else controls();
   if(storageError)message(storageError);
