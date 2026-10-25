@@ -1,5 +1,5 @@
 // DEVICE_FIRST_RECOVERY_V2: device copies are displayed before any cloud request.
-import { expenseRecoveryBase } from '../domain/device-expense-recovery.js';
+import { expenseRecoveryBase, restoreDeviceExpenses } from '../domain/device-expense-recovery.js';
 import {referenceCategory, referenceSuggestions, categoryDisplayText} from '../domain/reference-categories.js';
 import {readAttachment} from '../domain/attachments.js';
 import { assertShared, createSharedClient, sharedProject, mapSignature, mergeShared } from '../domain/shared-trip.js';
@@ -70,6 +70,7 @@ export async function installSharedRuntime(config) {
   const identity = config.repository + ':' + config.branch + ':' + config.path + ':' + seed.tripId;
   const key = 'travel-shared:' + identity, tokenKey = key + ':token';
   const draftStorage=preview?null:createDeviceDraftStorage();
+  let recoveryAccepted=false,recoveryError='',recoveryArchiveKey='';
   let deviceRecovery=false, recoveryCandidates=[], recoveryIndex=0, cachedDeviceTrip=null;
   let initializing = true, editing = false, syncTimer, syncPaused = false, syncError = '', failures = 0;
   let token = '', base = copy(seed), trip = copy(seed), envelope = null, dirty = false, busy = false, lastRead = 0, applied = false, savedShared = false, legacyDraft = null;
@@ -99,7 +100,7 @@ export async function installSharedRuntime(config) {
       // Decode and retain every device copy, including clean older releases.
       saved=unpackStorage(raw);
       const cached=saved?.trip||saved?.base;
-      if(cached?.tripId===seed.tripId)cachedDeviceTrip=copy(cached);
+      if(cached?.tripId===seed.tripId){cachedDeviceTrip=copy(cached);recoveryAccepted=saved.recoveryAccepted===true;}
     }
     catch(e){blockedDraft=true;storageError=e.message;}
     const sameSeed=saved?.seedSig===seedSig;
@@ -112,7 +113,7 @@ export async function installSharedRuntime(config) {
       else {blockedDraft=true;storageError='草稿的比較基準不屬於這趟旅程，原始資料已保留。';}
     } else if(saved?.dirty) {
       blockedDraft=true;storageError='草稿的旅程識別不符，原始資料已保留。';
-    } else if(sameSeed && (saved.base?.tripId===seed.tripId || !saved.base)) {
+    } else if((sameSeed||recoveryAccepted) && (saved.base?.tripId===seed.tripId || !saved.base)) {
       base=saved.base||copy(seed);trip=copy(base);savedShared=true;
     }
   } catch(e) {storageError=e.message;blockedDraft=true;}
@@ -138,7 +139,8 @@ export async function installSharedRuntime(config) {
     if(window.hasTravelDeviceExpenses?.())addCandidate('手機記帳暫存',personalState?.expenses);
     addCandidate('手機共享草稿',cachedDeviceTrip?.previewState?.expenses);
     addCandidate('手機舊版備份',legacyDraft?.trip?.previewState?.expenses);
-    deviceRecovery=recoveryCandidates.length>0 || Boolean(legacyDraft);
+    if(!recoveryCandidates.length&&!legacyDraft&&!blockedDraft&&!blockedLegacy)recoveryAccepted=true;
+    deviceRecovery=(!recoveryAccepted && recoveryCandidates.length>0) || Boolean(legacyDraft);
     if(deviceRecovery){
       // Prefer the phone's ledger, then another nonempty device snapshot.
       // Never infer that an empty/cloud snapshot deleted the device's records.
@@ -188,7 +190,7 @@ export async function installSharedRuntime(config) {
     if(preview)return true;
     if(deviceRecovery)return false;
     if(blockedDraft){message(storageError);return false;}
-    const snapshot=packStorage({seedSig,base,baseUnknown,trip:dirty?trip:null,dirty});
+    const snapshot=packStorage({seedSig,base,baseUnknown,trip:dirty?trip:null,dirty,recoveryAccepted});
     try{await draftStorage.write(key,snapshot);draftSaveFailed=false;if(!legacyDraft&&!blockedLegacy)window.commitTravelExpenseMirror?.(trip.previewState?.expenses||[]);return true;}
     catch{draftSaveFailed=true;message(en()?'This device could not save the draft. Keep this page open and share expenses & checklist as a backup.':'裝置無法保存草稿，請保持此頁開啟，先分享記帳與清單備份。');return false;}
   };
@@ -233,12 +235,16 @@ export async function installSharedRuntime(config) {
       const panel=document.createElement('div');panel.className='device-recovery-panel';panel.style.cssText='padding:8px 0;font-size:12px;color:#7b6754';
       const help=document.createElement('p');help.textContent=en()?'Device records are shown first. Sync and updates are paused; original copies are kept.':'先顯示手機記帳。同步與更新已暫停，原始暫存均保留。';panel.append(help);
       if(recoveryCandidates.length>1){
-        const select=document.createElement('select');select.setAttribute('aria-label',en()?'Device record version':'手機暫存版本');
+        const select=document.createElement('select');select.setAttribute('aria-label',en()?'Device record version':'手機暫存版本');select.disabled=busy;
         recoveryCandidates.forEach((item,index)=>{const option=document.createElement('option');option.value=index;option.textContent=item.source+'（'+item.expenses.length+'）';option.selected=index===recoveryIndex;select.append(option);});
         select.onchange=async()=>{recoveryIndex=Number(select.value);trip.previewState={...trip.previewState,expenses:copy(recoveryCandidates[recoveryIndex].expenses)};await redraw();};panel.append(select);
       }
       const backup=document.createElement('button');backup.type='button';backup.textContent=en()?'Download all device expense copies':'下載全部手機記帳備份';
-      backup.onclick=()=>{const data={format:'travel-device-expense-recovery-v1',tripId:seed.tripId,capturedAt:new Date().toISOString(),copies:recoveryCandidates.map(({source,expenses})=>({source,expenses}))};const url=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));const link=document.createElement('a');link.href=url;link.download='travel-device-expenses-backup.json';document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),60000);};panel.append(backup);document.querySelector('.hero')?.append(panel);
+      backup.onclick=()=>{const data={format:'travel-device-expense-recovery-v1',tripId:seed.tripId,capturedAt:new Date().toISOString(),copies:recoveryCandidates.map(({source,expenses})=>({source,expenses}))};const url=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));const link=document.createElement('a');link.href=url;link.download='travel-device-expenses-backup.json';document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),60000);};panel.append(backup);
+      const resume=document.createElement('button');resume.type='button';resume.disabled=busy||blockedDraft||blockedLegacy;resume.textContent=busy?(en()?'Restoring sync…':'正在恢復同步…'):(en()?'Resume sync using these device records':'以這份手機記帳恢復同步');resume.onclick=resumeDeviceSync;panel.append(resume);
+      const explanation=document.createElement('p');explanation.textContent=en()?'After checking your backup, resume once. Matching entries use this device’s values; entries only in the cloud are kept. Future edits sync automatically.':'確認備份與記帳完整後，按一次恢復同步。同一筆以目前手機內容為準；雲端獨有的記帳保留。之後新增與修改會自動同步。';panel.append(explanation);
+      if(recoveryError){const error=document.createElement('p');error.setAttribute('role','alert');error.textContent=recoveryError;panel.append(error);}
+      document.querySelector('.hero')?.append(panel);
     }
     const stale = mapSignature(trip)!==mapSignature(seed);
     document.querySelectorAll('.trip-map-shell').forEach(shell=>shell.hidden=stale);
@@ -480,6 +486,41 @@ export async function installSharedRuntime(config) {
       await save();
     },delay);
   }
+  async function resumeDeviceSync() {
+    if(!deviceRecovery||busy||reading||blockedDraft||blockedLegacy)return;
+    if(!token){authorization(resumeDeviceSync);return;}
+    const phone=copy(trip.previewState?.expenses||[]);
+    recoveryError='';setBusy(true);controls();
+    let uploaded=false;
+    try {
+      if(!recoveryArchiveKey){
+        const archiveKey=key+':recovery-backup:'+crypto.randomUUID();
+        await draftStorage.write(archiveKey,packStorage({format:'travel-device-expense-recovery-v1',tripId:seed.tripId,capturedAt:new Date().toISOString(),copies:recoveryCandidates.map(({source,expenses})=>({source,expenses})),originalDraft:await draftStorage.read(key),originalLegacy:await draftStorage.read(key+':legacy')}));
+        recoveryArchiveKey=archiveKey;
+      }
+      for(let attempt=0;attempt<3;attempt++){
+        const latest=await client.read();assertShared(latest.value,seed.tripId);
+        const next=copy(latest.value);
+        next.trip.previewState={...next.trip.previewState,expenses:restoreDeviceExpenses(phone,latest.value.trip.previewState?.expenses||[])};
+        next.updatedAt=new Date().toISOString();
+        // Preserve each overwritten cloud version locally before its CAS write.
+        await draftStorage.write(recoveryArchiveKey+':cloud:'+crypto.randomUUID(),packStorage({sha:latest.sha,value:latest.value}));
+        try{await client.write(next,latest.sha);uploaded=true;}
+        catch(error){if(error.status===409||error.status===422)continue;throw error;}
+        // Only a committed receipt opts this device out of recovery on reopening.
+        await draftStorage.write(key,packStorage({seedSig,base:next.trip,baseUnknown:false,trip:null,dirty:false,recoveryAccepted:true}));
+        await draftStorage.remove(key+':legacy');
+        window.commitTravelExpenseMirror?.(next.trip.previewState.expenses);
+        base=copy(next.trip);trip=copy(next.trip);baseUnknown=false;envelope=next;
+        legacyDraft=null;dirty=false;deferredSha=null;recoveryAccepted=true;deviceRecovery=false;syncPaused=false;draftSaveFailed=false;syncError='';failures=0;
+        await redraw();message(en()?'Device records synced. Automatic sync resumed.':'手機記帳已同步，自動同步已恢復。');return;
+      }
+      throw Error(en()?'Other devices are changing records. Your device copies are kept; please retry.':'其他裝置正在修改，手機資料仍保留，請再試一次。');
+    }catch(error){
+      recoveryError=(uploaded?(en()?'Cloud upload completed, but local recovery is incomplete. Original backup kept. ':'雲端已收到記帳，但本機恢復尚未完成，原始備份仍保留。 '):'')+error.message;
+      message(recoveryError);
+    }finally{setBusy(false);controls();}
+  }
   async function save() {
     if(deviceRecovery){message(en()?'Device recovery: original records are kept; sync is paused.':'目前先保留手機記帳，尚未恢復雲端同步。');return;}
     if(reading)return;
@@ -497,8 +538,8 @@ export async function installSharedRuntime(config) {
       throw Error('其他人持續修改，請稍後再按儲存；草稿仍保留。');
     }catch(e){syncError=e.message;failures++;message(e.message+' 記帳仍保留，連線恢復後會自動重試。');}finally{setBusy(false);controls();scheduleSync(Math.min(60000,5000*2**Math.min(failures,4)));}
   }
-  function authorization() {
-    if(deviceRecovery){message('目前先顯示手機暫存，請先保留記帳備份。');return;}
+  function authorization(afterAuthorized=null) {
+    if(deviceRecovery&&!afterAuthorized){message('目前先顯示手機暫存，請先保留記帳備份。');return;}
     if(document.querySelector('.shared-dialog[open]'))return;
     const d=document.createElement('dialog');d.className='shared-dialog shared-auth';
     const text=(zh,english)=>en()?english:zh;
@@ -509,7 +550,7 @@ export async function installSharedRuntime(config) {
     d.querySelector('[data-remove]').onclick=()=>{exitEditing();d.close();};
     const forgetBtn=d.querySelector('[data-forget]');if(forgetBtn)forgetBtn.onclick=()=>{token='';clearTimeout(syncTimer);try{localStorage.removeItem(tokenKey);localStorage.setItem(key+':editing','0');}catch{}exitEditing();d.close();message(text('已清除本機記住的授權','Remembered token cleared'));};
     d.querySelector('form').onsubmit=async e=>{e.preventDefault();const f=e.target;if(preview){token='preview';editing=true;controls();notifyPreview(false);d.close();return;}const entered=(f.elements.token.value.trim()||remembered),b=f.querySelector('[type=submit]');if(!entered){f.querySelector('[role=status]').textContent=text('請先輸入 GitHub Token。','Enter your GitHub token first.');f.elements.token.focus();return;}b.disabled=true;
-      try{const response=await fetch('https://api.github.com/repos/'+config.repository,{headers:{Authorization:'Bearer '+entered,Accept:'application/vnd.github+json'},cache:'no-store',redirect:'error',signal:AbortSignal.timeout(25000)});if(!response.ok)throw Error('Token 驗證失敗，請檢查授權。');const repo=await response.json();if(!repo.permissions?.push)throw Error('這份授權沒有儲存庫寫入資格。');token=entered;editing=true;syncPaused=false;try{localStorage.setItem(key+':editing','1');sessionStorage.removeItem(key+':exited');}catch{}try{if(f.elements.remember.checked)localStorage.setItem(tokenKey,token);else localStorage.removeItem(tokenKey);}catch{message('授權只暫留於此頁，裝置無法記住 Token。');}f.elements.token.value='';d.close();setBusy(true);let merged=false;try{merged=await applyLegacy();}finally{setBusy(false);}controls();if(merged)await refresh(true);else syncPaused=true;controls();scheduleSync();}catch(e){f.querySelector('[role=status]').textContent=e.message;}finally{b.disabled=false;}};
+      try{const response=await fetch('https://api.github.com/repos/'+config.repository,{headers:{Authorization:'Bearer '+entered,Accept:'application/vnd.github+json'},cache:'no-store',redirect:'error',signal:AbortSignal.timeout(25000)});if(!response.ok)throw Error('Token 驗證失敗，請檢查授權。');const repo=await response.json();if(!repo.permissions?.push)throw Error('這份授權沒有儲存庫寫入資格。');token=entered;editing=true;syncPaused=false;try{localStorage.setItem(key+':editing','1');sessionStorage.removeItem(key+':exited');}catch{}try{if(f.elements.remember.checked)localStorage.setItem(tokenKey,token);else localStorage.removeItem(tokenKey);}catch{message('授權只暫留於此頁，裝置無法記住 Token。');}f.elements.token.value='';d.close();if(afterAuthorized){await afterAuthorized();return;}setBusy(true);let merged=false;try{merged=await applyLegacy();}finally{setBusy(false);}controls();if(merged)await refresh(true);else syncPaused=true;controls();scheduleSync();}catch(e){f.querySelector('[role=status]').textContent=e.message;}finally{b.disabled=false;}};
   }
   let taps=0,lastTap=0,lastTarget='';
   document.addEventListener('click',e=>{

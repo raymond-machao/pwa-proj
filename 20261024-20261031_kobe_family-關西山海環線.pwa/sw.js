@@ -110,6 +110,13 @@ self.addEventListener('message',e=>{
      if(!await valid(response,hash)){response=await fetch(url,{cache:'no-store'});if(!await valid(response,hash))throw Error('Incomplete release');}
      await dest.put(url,response);
     });
+    // Recovery pages intentionally pause normal commit. Permit their next
+    // navigation to use the fully verified recovery release even if sw.js
+    // did not otherwise change between publications.
+    const recoveryRuntime=await dest.match(new URL('editor/js/preview/shared-runtime.js',SCOPE).href);
+    if(recoveryRuntime && (await recoveryRuntime.text()).includes('DEVICE_FIRST_RECOVERY_V2')){
+     const metadata=await caches.open(META);await metadata.put(recoveryPointer,new Response(name));
+    }
    }else{
     const dest=await caches.open(name);
     for(const path of Object.keys(manifest.files))if(!await dest.match(new URL(path,SCOPE).href))throw Error('Release not staged');
