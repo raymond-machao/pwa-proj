@@ -4,6 +4,8 @@ const PREFIX='travel-planner-pwa:'+encodeURIComponent(SCOPE)+':';
 const META=PREFIX+'metadata';
 const BOOT=PREFIX+'v10';
 const pointer=new URL('__active_release__',SCOPE).href;
+// One-time handoff on the next navigation; never reload an open dirty page.
+const recoveryPointer=new URL('__device_recovery_release__',SCOPE).href;
 async function active(){const m=await caches.open(META);const r=await m.match(pointer);return r?await r.text():BOOT;}
 function validPath(path){return /^(?:index\.html|manifest\.webmanifest|sw\.js|icon\.svg|icon-192\.png|icon-512\.png|apple-touch-icon\.png|editor\/js\/[\w./-]+\.js|maps\/[a-f0-9]{64}\.(?:png|webp))$/.test(path)&&!path.split('/').includes('..');}
 async function valid(response,hash){
@@ -51,6 +53,12 @@ self.addEventListener('install',e=>e.waitUntil((async()=>{
   }
   const metadata=await caches.open(META),boot=await caches.open(BOOT);
   if(!await metadata.match(pointer)&&!await boot.match(new URL('index.html',SCOPE).href))await metadata.put(pointer,new Response(name));
+  const recoveryRuntime=await cache.match(new URL('editor/js/preview/shared-runtime.js',SCOPE).href);
+  if(recoveryRuntime && (await recoveryRuntime.text()).includes('DEVICE_FIRST_RECOVERY_V2')){
+   // Written only after every asset was fetched and hash-verified above.
+   // This changes application code selection, never localStorage or IndexedDB.
+   await metadata.put(recoveryPointer,new Response(name));
+  }
   await self.skipWaiting();
  }catch(error){await caches.delete(name);throw error;}
 })()));
@@ -60,8 +68,18 @@ self.addEventListener('fetch',e=>{
  const u=new URL(e.request.url);
  if(e.request.method!=='GET'||u.origin!==self.location.origin||!u.href.startsWith(SCOPE)||u.pathname.endsWith('/publish.json')||e.request.cache==='no-store')return;
  e.respondWith((async()=>{
-  const c=await caches.open(await active());
   const page=e.request.mode==='navigate'||u.pathname.endsWith('/index.html')||u.href===SCOPE;
+  if(e.request.mode==='navigate'){
+   const metadata=await caches.open(META),candidate=await metadata.match(recoveryPointer);
+   if(candidate){
+    const name=await candidate.text(),ready=await caches.open(name);
+    if(await ready.match(new URL('index.html',SCOPE).href)){
+     await metadata.put(pointer,new Response(name));
+     await metadata.delete(recoveryPointer);
+    }
+   }
+  }
+  const c=await caches.open(await active());
   const saved=await c.match(page?new URL('index.html',SCOPE).href:e.request);
   if(saved)return saved;
   const r=await fetch(e.request);

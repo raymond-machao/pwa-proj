@@ -1,3 +1,4 @@
+// DEVICE_FIRST_RECOVERY_V2: device copies are displayed before any cloud request.
 import { expenseRecoveryBase } from '../domain/device-expense-recovery.js';
 import {referenceCategory, referenceSuggestions, categoryDisplayText} from '../domain/reference-categories.js';
 import {readAttachment} from '../domain/attachments.js';
@@ -95,9 +96,7 @@ export async function installSharedRuntime(config) {
     let saved;
     try {
       const raw=await draftStorage.read(key);hadSharedCache=raw!==null;
-      const header=raw?JSON.parse(raw):null;
-      // A clean cache from an old release is disposable even when its old
-      // attachment references cannot be decoded with the current seed.
+      // Decode and retain every device copy, including clean older releases.
       saved=unpackStorage(raw);
       const cached=saved?.trip||saved?.base;
       if(cached?.tripId===seed.tripId)cachedDeviceTrip=copy(cached);
@@ -139,7 +138,7 @@ export async function installSharedRuntime(config) {
     if(window.hasTravelDeviceExpenses?.())addCandidate('手機記帳暫存',personalState?.expenses);
     addCandidate('手機共享草稿',cachedDeviceTrip?.previewState?.expenses);
     addCandidate('手機舊版備份',legacyDraft?.trip?.previewState?.expenses);
-    deviceRecovery=Boolean(legacyDraft)||recoveryCandidates.length>1||Boolean(cachedDeviceTrip&&!savedShared&&JSON.stringify(normalizeExpenses(cachedDeviceTrip.previewState?.expenses))!==JSON.stringify(normalizeExpenses(seed.previewState?.expenses)));
+    deviceRecovery=recoveryCandidates.length>0 || Boolean(legacyDraft);
     if(deviceRecovery){
       // Prefer the phone's ledger, then another nonempty device snapshot.
       // Never infer that an empty/cloud snapshot deleted the device's records.
