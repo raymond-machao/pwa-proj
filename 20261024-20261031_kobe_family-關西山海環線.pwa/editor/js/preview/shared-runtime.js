@@ -71,7 +71,7 @@ export async function installSharedRuntime(config) {
   const key = 'travel-shared:' + identity, tokenKey = key + ':token';
   const draftStorage=preview?null:createDeviceDraftStorage();
   let recoveryAccepted=false,recoveryError='',recoveryArchiveKey='';
-  let deviceRecovery=false, recoveryCandidates=[], recoveryIndex=0, cachedDeviceTrip=null;
+  let deviceRecovery=false, recoveryCandidates=[], recoveryIndex=0, cachedDeviceTrip=null, cleanDeviceCache=false;
   let initializing = true, editing = false, syncTimer, syncPaused = false, syncError = '', failures = 0;
   let token = '', base = copy(seed), trip = copy(seed), envelope = null, dirty = false, busy = false, lastRead = 0, applied = false, savedShared = false, legacyDraft = null;
   let reading=false,deferredSha=null,lastReadError='',storageError='',blockedDraft=false,blockedLegacy=false,baseUnknown=false,hadSharedCache=false;
@@ -99,6 +99,7 @@ export async function installSharedRuntime(config) {
       const raw=await draftStorage.read(key);hadSharedCache=raw!==null;
       // Decode and retain every device copy, including clean older releases.
       saved=unpackStorage(raw);
+      cleanDeviceCache=saved?.dirty===false && !saved.trip && saved.base?.tripId===seed.tripId;
       const cached=saved?.trip||saved?.base;
       if(cached?.tripId===seed.tripId){cachedDeviceTrip=copy(cached);recoveryAccepted=saved.recoveryAccepted===true;}
     }
@@ -119,8 +120,13 @@ export async function installSharedRuntime(config) {
   } catch(e) {storageError=e.message;blockedDraft=true;}
   const personalState = window.getTravelPreviewState?.();
   const normalizeExpenses = rows => (rows||[]).map(row=>createMobileTransferTools().expense(row,trip.settings?.homeCurrency));
+  // A downloaded cache is not a local edit. Compare against its own baseline,
+  // not the newly published HTML, before deciding whether recovery is needed.
+  const cleanMirror=cleanDeviceCache && (!window.hasTravelDeviceExpenses?.() || JSON.stringify(normalizeExpenses(personalState?.expenses))===JSON.stringify(normalizeExpenses(cachedDeviceTrip?.previewState?.expenses)));
+  const emptyReader=!hadSharedCache && !dirty && !(personalState?.expenses?.length) && !(seed.previewState?.expenses?.length);
+  if(!preview&&!legacyDraft&&!blockedDraft&&!blockedLegacy&&(cleanMirror||emptyReader))recoveryAccepted=true;
   // Preserve disagreements BEFORE any render or write can shadow the raw ledger.
-  if(!preview && !legacyDraft && !blockedDraft && !blockedLegacy && personalState && window.hasTravelDeviceExpenses?.()) {
+  if(!preview && !cleanMirror && !emptyReader && !legacyDraft && !blockedDraft && !blockedLegacy && personalState && window.hasTravelDeviceExpenses?.()) {
     const local=normalizeExpenses(personalState.expenses), current=normalizeExpenses(trip.previewState?.expenses);
     if(JSON.stringify(local)!==JSON.stringify(current)) {
       const personalTrip=copy(trip);personalTrip.previewState={...personalTrip.previewState,expenses:local};
@@ -230,8 +236,8 @@ export async function installSharedRuntime(config) {
     if(!preview){
       let indicator=document.querySelector('.shared-sync-status');
       if(!indicator){indicator=document.createElement('button');indicator.className='shared-sync-status';indicator.type='button';document.querySelector('.hero')?.append(indicator);}
-      const syncLabel=deviceRecovery?'目前顯示手機暫存・雲端同步已暫停':blockedDraft||blockedLegacy?'記帳資料待恢復':syncPaused?'同步衝突待處理':draftSaveFailed?'裝置保存失敗，更新已暫緩':!token?'記帳僅在此裝置・設定同步授權':busy?'同步中…':syncError?'連線失敗，將自動重試':dirty?'等待自動同步':'已同步';
-      const syncEnglish={'目前顯示手機暫存・雲端同步已暫停':'Showing device records · Sync paused','記帳資料待恢復':'Expense recovery needed','同步衝突待處理':'Resolve sync conflict','裝置保存失敗，更新已暫緩':'Device save failed; update paused','記帳僅在此裝置・設定同步授權':'Device only · Set up sync','同步中…':'Syncing…','連線失敗，將自動重試':'Connection failed; retrying automatically','等待自動同步':'Waiting to sync','已同步':'Synced'};
+      const syncLabel=deviceRecovery?'目前顯示手機暫存・雲端同步已暫停':blockedDraft||blockedLegacy?'記帳資料待恢復':syncPaused?'同步衝突待處理':draftSaveFailed?'裝置保存失敗，更新已暫緩':!token&&dirty?'記帳僅在此裝置・設定同步授權':busy?'同步中…':syncError?'連線失敗，將自動重試':dirty?'等待自動同步':!envelope?'正在接收共享資料…':'已同步';
+      const syncEnglish={'目前顯示手機暫存・雲端同步已暫停':'Showing device records · Sync paused','記帳資料待恢復':'Expense recovery needed','同步衝突待處理':'Resolve sync conflict','裝置保存失敗，更新已暫緩':'Device save failed; update paused','記帳僅在此裝置・設定同步授權':'Device only · Set up sync','同步中…':'Syncing…','連線失敗，將自動重試':'Connection failed; retrying automatically','等待自動同步':'Waiting to sync','已同步':'Synced','正在接收共享資料…':'Receiving shared data…'};
       const label=en()?syncEnglish[syncLabel]:syncLabel;
       const fontButton=document.getElementById('text-size-toggle');
       const compact=syncLabel==='已同步'&&Boolean(fontButton);
@@ -242,7 +248,7 @@ export async function installSharedRuntime(config) {
         if(!tools){tools=document.createElement('div');tools.className='shared-font-tools';fontButton.replaceWith(tools);tools.append(fontButton);}
         tools.append(indicator);
       }else document.querySelector('.hero')?.append(indicator);
-      indicator.onclick=()=>{if(compact){message(label);return;}if(deviceRecovery){document.querySelector('.device-recovery-panel')?.scrollIntoView({block:'center'});return;}if(!token)authorization();else{syncPaused=false;scheduleSync(0);}};
+      indicator.onclick=()=>{if(compact){message(label);return;}if(deviceRecovery){document.querySelector('[data-feature-target="expenses-'+(en()?'en':'zh')+'"]')?.click();document.querySelector('.device-recovery-panel')?.scrollIntoView({block:'start'});return;}if(!token)authorization();else{syncPaused=false;scheduleSync(0);}};
     }
     if(deviceRecovery){
       const panel=document.createElement('div');panel.className='device-recovery-panel';panel.style.cssText='padding:8px 0;font-size:12px;color:#7b6754';
@@ -252,12 +258,14 @@ export async function installSharedRuntime(config) {
         recoveryCandidates.forEach((item,index)=>{const option=document.createElement('option');option.value=index;option.textContent=item.source+'（'+item.expenses.length+'）';option.selected=index===recoveryIndex;select.append(option);});
         select.onchange=async()=>{recoveryIndex=Number(select.value);trip.previewState={...trip.previewState,expenses:copy(recoveryCandidates[recoveryIndex].expenses)};await redraw();};panel.append(select);
       }
+      const receive=document.createElement('button');receive.type='button';receive.disabled=busy||blockedDraft||blockedLegacy;receive.textContent=en()?'Receive latest shared data only':'只接收最新共享資料';receive.onclick=receiveSharedOnly;panel.append(receive);
+      const readHelp=document.createElement('p');readHelp.textContent=en()?'If you did not edit expenses here, receive only. Device copies are backed up; nothing is uploaded.':'沒有在這支手機記帳，請選只接收。會先保留舊暫存備份，不上傳或覆蓋大家的資料。';panel.append(readHelp);
       const backup=document.createElement('button');backup.type='button';backup.textContent=en()?'Download all device expense copies':'下載全部手機記帳備份';
       backup.onclick=()=>{const data={format:'travel-device-expense-recovery-v1',tripId:seed.tripId,capturedAt:new Date().toISOString(),copies:recoveryCandidates.map(({source,expenses})=>({source,expenses}))};const url=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));const link=document.createElement('a');link.href=url;link.download='travel-device-expenses-backup.json';document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),60000);};panel.append(backup);
       const resume=document.createElement('button');resume.type='button';resume.disabled=busy||blockedDraft||blockedLegacy;resume.textContent=busy?(en()?'Restoring sync…':'正在恢復同步…'):(en()?'Resume sync using these device records':'以這份手機記帳恢復同步');resume.onclick=resumeDeviceSync;panel.append(resume);
       const explanation=document.createElement('p');explanation.textContent=en()?'After checking your backup, resume once. Matching entries use this device’s values; entries only in the cloud are kept. Future edits sync automatically.':'確認備份與記帳完整後，按一次恢復同步。同一筆以目前手機內容為準；雲端獨有的記帳保留。之後新增與修改會自動同步。';panel.append(explanation);
       if(recoveryError){const error=document.createElement('p');error.setAttribute('role','alert');error.textContent=recoveryError;panel.append(error);}
-      document.querySelector('.hero')?.append(panel);
+      document.querySelector('.feature-page[id="expenses-'+(en()?'en':'zh')+'"]')?.prepend(panel);
     }
     const stale = mapSignature(trip)!==mapSignature(seed);
     document.querySelectorAll('.trip-map-shell').forEach(shell=>shell.hidden=stale);
@@ -486,7 +494,7 @@ export async function installSharedRuntime(config) {
       const changed=JSON.stringify(trip)!==JSON.stringify(merged);base=copy(latest.value.trip);baseUnknown=false;trip=copy(merged);dirty=JSON.stringify(trip)!==JSON.stringify(base);deferredSha=null;await persist();
       if(changed&&!legacyDraft)await redraw();else controls();
       message(en()?'Shared changes merged. Your unsaved edits are kept.':'共享更新已合併，自己的未儲存修改仍保留。');
-    }catch(e){const reason=navigator.onLine?e.message:'目前離線，保留裝置上的資料。';if(lastReadError!==reason){lastReadError=reason;message(reason);}}finally{reading=false;if(locked){lock(false);setBusy(false);}scheduleSync();}
+    }catch(e){const reason=navigator.onLine?e.message:'目前離線，保留裝置上的資料。';if(lastReadError!==reason){lastReadError=reason;message(reason);}}finally{reading=false;if(locked){lock(false);setBusy(false);}controls();scheduleSync();}
   }
   function scheduleSync(delay=1200) {
     if(preview||deviceRecovery||!token||syncPaused||blockedDraft||blockedLegacy||(!dirty&&!legacyDraft))return;
@@ -499,6 +507,29 @@ export async function installSharedRuntime(config) {
       await save();
     },delay);
   }
+  async function archiveDeviceCopies() {
+    if(recoveryArchiveKey)return;
+    const archiveKey=key+':recovery-backup:'+crypto.randomUUID();
+    await draftStorage.write(archiveKey,packStorage({format:'travel-device-expense-recovery-v1',tripId:seed.tripId,capturedAt:new Date().toISOString(),copies:recoveryCandidates.map(({source,expenses})=>({source,expenses})),originalDraft:await draftStorage.read(key),originalLegacy:await draftStorage.read(key+':legacy')}));
+    recoveryArchiveKey=archiveKey;
+  }
+  async function receiveSharedOnly() {
+    if(!deviceRecovery||busy||reading||blockedDraft||blockedLegacy)return;
+    recoveryError='';setBusy(true);controls();
+    try {
+      await archiveDeviceCopies();
+      const latest=await client.read();assertShared(latest.value,seed.tripId);
+      const next=copy(latest.value);
+      await draftStorage.write(key,packStorage({seedSig,base:next.trip,baseUnknown:false,trip:null,dirty:false,recoveryAccepted:true}));
+      await draftStorage.remove(key+':legacy');
+      window.commitTravelExpenseMirror?.(next.trip.previewState?.expenses||[]);
+      base=copy(next.trip);trip=copy(next.trip);baseUnknown=false;envelope=next;
+      legacyDraft=null;dirty=false;deferredSha=null;recoveryAccepted=true;deviceRecovery=false;syncPaused=false;draftSaveFailed=false;syncError='';failures=0;
+      window.__travelSharedReadAt=lastRead=Date.now();
+      await redraw();message(en()?'Latest shared data received. Device backup kept; nothing uploaded.':'已接收最新共享資料，舊暫存已備份，沒有上傳。');
+    }catch(error){recoveryError=error.message;message(recoveryError);}
+    finally{setBusy(false);controls();}
+  }
   async function resumeDeviceSync() {
     if(!deviceRecovery||busy||reading||blockedDraft||blockedLegacy)return;
     if(!token){authorization(resumeDeviceSync);return;}
@@ -506,11 +537,7 @@ export async function installSharedRuntime(config) {
     recoveryError='';setBusy(true);controls();
     let uploaded=false;
     try {
-      if(!recoveryArchiveKey){
-        const archiveKey=key+':recovery-backup:'+crypto.randomUUID();
-        await draftStorage.write(archiveKey,packStorage({format:'travel-device-expense-recovery-v1',tripId:seed.tripId,capturedAt:new Date().toISOString(),copies:recoveryCandidates.map(({source,expenses})=>({source,expenses})),originalDraft:await draftStorage.read(key),originalLegacy:await draftStorage.read(key+':legacy')}));
-        recoveryArchiveKey=archiveKey;
-      }
+      await archiveDeviceCopies();
       for(let attempt=0;attempt<3;attempt++){
         const latest=await client.read();assertShared(latest.value,seed.tripId);
         const next=copy(latest.value);
@@ -587,7 +614,7 @@ export async function installSharedRuntime(config) {
   window.addEventListener('online',()=>{failures=0;scheduleSync(0);refresh(true);});document.addEventListener('visibilitychange',()=>refresh());window.addEventListener('focus',()=>refresh());
   window.addEventListener('beforeunload',e=>{if((dirty||legacyDraft||draftSaveFailed)&&!preview){e.preventDefault();e.returnValue='';}});
   if(!preview)setInterval(()=>{if(draftSaveFailed&&!busy&&!reading)persist().then(()=>controls());if(dirty||legacyDraft){if(!syncTimer)scheduleSync(0);}else refresh();},5000);
-  window.__travelSharedController={save,refresh,authorization,get syncState(){return deviceRecovery?'device-recovery':blockedDraft||blockedLegacy?'recovery':syncPaused?'conflict':draftSaveFailed?'storage-error':!token?'authorization':busy?'syncing':syncError?'retrying':dirty?'pending':'synced';},get trip(){return copy(trip);},get dirty(){return dirty;},get updating(){return initializing||busy||reading||Boolean(draftStorage?.pending);},get legacyPending(){return deviceRecovery||Boolean(legacyDraft)||blockedLegacy||blockedDraft||draftSaveFailed;},projectSaved(){if(preview){dirty=false;controls();}}};
+  window.__travelSharedController={save,refresh,authorization,get syncState(){return deviceRecovery?'device-recovery':blockedDraft||blockedLegacy?'recovery':syncPaused?'conflict':draftSaveFailed?'storage-error':!token&&dirty?'authorization':busy?'syncing':syncError?'retrying':dirty?'pending':!envelope?'receiving':'synced';},get trip(){return copy(trip);},get dirty(){return dirty;},get updating(){return initializing||busy||reading||Boolean(draftStorage?.pending);},get legacyPending(){return deviceRecovery||Boolean(legacyDraft)||blockedLegacy||blockedDraft||draftSaveFailed;},projectSaved(){if(preview){dirty=false;controls();}}};
   if(deviceRecovery){await redraw();initializing=false;controls();return;}
   await persist();
   if(!legacyDraft&&JSON.stringify(trip)!==JSON.stringify(seed))await redraw();else controls();
