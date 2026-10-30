@@ -70,6 +70,7 @@ export async function installSharedRuntime(config) {
   const identity = config.repository + ':' + config.branch + ':' + config.path + ':' + seed.tripId;
   const key = 'travel-shared:' + identity, tokenKey = key + ':token';
   const draftStorage=preview?null:createDeviceDraftStorage();
+  let uploading=false,pendingUpload=null;
   let recoveryAccepted=false,recoveryError='',recoveryArchiveKey='';
   let deviceRecovery=false, recoveryCandidates=[], recoveryIndex=0, cachedDeviceTrip=null, cleanDeviceCache=false;
   let initializing = true, editing = false, syncTimer, syncPaused = false, syncError = '', failures = 0;
@@ -99,6 +100,7 @@ export async function installSharedRuntime(config) {
       const raw=await draftStorage.read(key);hadSharedCache=raw!==null;
       // Decode and retain every device copy, including clean older releases.
       saved=unpackStorage(raw);
+      if(saved?.pendingUpload?.trip?.tripId===seed.tripId && saved.pendingUpload.localSnapshot?.tripId===seed.tripId)pendingUpload=saved.pendingUpload;
       cleanDeviceCache=saved?.dirty===false && !saved.trip && saved.base?.tripId===seed.tripId;
       const cached=saved?.trip||saved?.base;
       if(cached?.tripId===seed.tripId){cachedDeviceTrip=copy(cached);recoveryAccepted=saved.recoveryAccepted===true;}
@@ -200,7 +202,7 @@ export async function installSharedRuntime(config) {
     if(preview)return true;
     if(deviceRecovery)return false;
     if(blockedDraft){message(storageError);return false;}
-    const snapshot=packStorage({seedSig,base,baseUnknown,trip:dirty?trip:null,dirty,recoveryAccepted});
+    const snapshot=packStorage({seedSig,base,baseUnknown,trip:dirty?trip:null,dirty,recoveryAccepted,pendingUpload});
     try{await draftStorage.write(key,snapshot);draftSaveFailed=false;if(!legacyDraft&&!blockedLegacy)window.commitTravelExpenseMirror?.(trip.previewState?.expenses||[]);return true;}
     catch{draftSaveFailed=true;message(en()?'This device could not save the draft. Keep this page open and share expenses & checklist as a backup.':'裝置無法保存草稿，請保持此頁開啟，先分享記帳與清單備份。');return false;}
   };
@@ -465,6 +467,14 @@ export async function installSharedRuntime(config) {
       for(const [k,v] of Object.entries(rest))if(s[k]!==v){s.manualFields||={};s.manualFields[k]=true;}Object.assign(s,rest);s.links={...s.links,googleMaps};s.nextLeg={...s.nextLeg,mode,duration,distance};if(!row){if(day.stops.length){const previous=day.stops.at(-1);previous.nextLeg={...newStop().nextLeg,mode:previous.nextLeg?.mode||''};}day.stops.push(s);}
     },true);
   }
+  function acknowledgeOwnUpload(remote) {
+    if(!pendingUpload||JSON.stringify(pendingUpload.trip)!==JSON.stringify(remote))return false;
+    const later=mergeShared(pendingUpload.localSnapshot,trip,remote);
+    trip=mergeShared(pendingUpload.localSnapshot,trip,remote,Object.fromEntries(later.conflicts.map(c=>[c.path,'local']))).trip;
+    base=copy(remote);baseUnknown=false;pendingUpload=null;
+    dirty=JSON.stringify(trip)!==JSON.stringify(base);
+    return true;
+  }
   async function refresh(manual=false) {
     if(preview||deviceRecovery||blockedDraft||blockedLegacy||syncPaused)return;
     if(busy||reading||document.hidden||document.querySelector('.shared-dialog[open],#global-expense-modal.active')||(!manual&&Date.now()-lastRead<(token?15000:300000)))return;
@@ -476,6 +486,7 @@ export async function installSharedRuntime(config) {
       lastReadError='';
       if(document.querySelector('.shared-dialog[open],#global-expense-modal.active')){lastRead=0;return;}
       window.__travelSharedReadAt=Date.now();
+      if(acknowledgeOwnUpload(latest.value.trip)){locked=true;lock(true);setBusy(true);await persist();await redraw();return;}
       if(!manual&&deferredSha===latest.sha)return;
       const latestSeedRaw=JSON.stringify(latest.value.seed);
       if(hashText(latestSeedRaw)!==seedSig && JSON.stringify(latest.value.trip)===latestSeedRaw){if(!applied&&!legacyDraft){window.applyTravelSharedState?.(trip);applied=true;}return;}
@@ -566,17 +577,50 @@ export async function installSharedRuntime(config) {
     if(reading)return;
     syncPaused=false;
     if(busy||!token)return;capture();if(!preview){setBusy(true);try{if(!await applyLegacy(true)){syncPaused=true;return;}}finally{setBusy(false);}}if(preview){setBusy(true);try{if(!await notifyPreview(true))return;const saved=await new Promise(resolve=>window.dispatchEvent(new CustomEvent('travel-shared-preview-save',{detail:{complete:resolve}})));if(saved){dirty=false;controls();message(en()?'Project saved':'專案已儲存');}}finally{setBusy(false);}return;}dirty=true;setBusy(true);await persist();
+    uploading=true;controls();
+    let sentSnapshot=copy(trip);
+    const waitForExpenseForm=async()=>{while(document.querySelector('#global-expense-modal.active,.shared-dialog[open]'))await new Promise(resolve=>setTimeout(resolve,100));};
     try {
       let candidate=copy(trip), ancestor=copy(base);
       for(let attempt=0;attempt<3;attempt++){
         const latest=await client.read();assertShared(latest.value,seed.tripId);
-        const merged=await resolveSharedMerge(ancestor,candidate,latest.value.trip);if(!merged){syncPaused=true;message('同步衝突尚未處理，兩份資料均保留。');return;}
+        if(acknowledgeOwnUpload(latest.value.trip)){ancestor=copy(base);candidate=copy(trip);sentSnapshot=copy(trip);}
+        let merged=mergeShared(ancestor,candidate,latest.value.trip);
+        if(merged.conflicts.length){
+          await waitForExpenseForm();uploading=false;
+          // Conflict choices must describe the newest local intent, not the
+          // stale snapshot taken before the network request started.
+          const newer=mergeShared(sentSnapshot,trip,candidate);
+          candidate=mergeShared(sentSnapshot,trip,candidate,Object.fromEntries(newer.conflicts.map(c=>[c.path,'local']))).trip;
+          sentSnapshot=copy(trip);
+          merged=await resolveSharedMerge(ancestor,candidate,latest.value.trip);uploading=true;
+        }else merged=merged.trip;
+        if(!merged){syncPaused=true;message('同步衝突尚未處理，兩份資料均保留。');return;}
         const next={...latest.value,trip:sharedProject(merged),updatedAt:new Date().toISOString()};
-        try {await client.write(next,latest.sha);base=copy(next.trip);baseUnknown=false;trip=copy(base);envelope=next;dirty=false;deferredSha=null;legacyDraft=null;try{await draftStorage.remove(key+':legacy');}catch{}await persist();await redraw();syncError='';failures=0;message(en()?'Synced':'已同步');return;}
+        try {
+          pendingUpload={trip:copy(next.trip),localSnapshot:copy(sentSnapshot)};
+          await persist();
+          await client.write(next,latest.sha);
+          // Never replace an active form. Its submit event persists the newer
+          // local state against the old baseline before acknowledgment applies.
+          await waitForExpenseForm();uploading=false;
+          capture();
+          // sentSnapshot is immutable for this request (including SHA retries).
+          // Local differences since it are later user intent. Rebase those onto
+          // the acknowledged server value, retaining server-only changes.
+          const later=mergeShared(sentSnapshot,trip,next.trip);
+          const choices=Object.fromEntries(later.conflicts.map(c=>[c.path,'local']));
+          trip=mergeShared(sentSnapshot,trip,next.trip,choices).trip;
+          base=copy(next.trip);baseUnknown=false;envelope=next;pendingUpload=null;
+          dirty=JSON.stringify(trip)!==JSON.stringify(base);deferredSha=null;legacyDraft=null;
+          try{await draftStorage.remove(key+':legacy');}catch{}
+          await persist();await redraw();syncError='';failures=0;
+          if(!dirty)message(en()?'Synced':'已同步');return;
+        }
         catch(e){if(e.status!==409&&e.status!==422)throw e;ancestor=copy(latest.value.trip);candidate=merged;}
       }
       throw Error('其他人持續修改，請稍後再按儲存；草稿仍保留。');
-    }catch(e){syncError=e.message;failures++;message(e.message+' 記帳仍保留，連線恢復後會自動重試。');}finally{setBusy(false);controls();scheduleSync(Math.min(60000,5000*2**Math.min(failures,4)));}
+    }catch(e){syncError=e.message;failures++;message(e.message+' 記帳仍保留，連線恢復後會自動重試。');}finally{uploading=false;setBusy(false);controls();scheduleSync(failures?Math.min(60000,5000*2**Math.min(failures,4)):1200);}
   }
   function authorization(afterAuthorized=null) {
     if(deviceRecovery&&!afterAuthorized){message('目前先顯示手機暫存，請先保留記帳備份。');return;}
@@ -601,7 +645,7 @@ export async function installSharedRuntime(config) {
     const now=Date.now();taps=target===lastTarget&&now-lastTap<1500?taps+1:1;lastTarget=target;lastTap=now;
     if(taps===5){taps=0;authorization();}
   },true);
-  document.addEventListener('click',e=>{if((busy||deviceRecovery)&&e.target.closest('.day-expense,.rrow,.expense-delete-btn,[data-pack-id]')){e.preventDefault();e.stopImmediatePropagation();}},true);
+  document.addEventListener('click',e=>{if(((busy&&!uploading)||deviceRecovery)&&e.target.closest('.day-expense,.rrow,.expense-delete-btn,[data-pack-id]')){e.preventDefault();e.stopImmediatePropagation();}},true);
   window.addEventListener('travel-preview-change',async()=>{
     if(deviceRecovery)return;
     // Expenses are editable before authorization too. Keep that device draft
@@ -609,7 +653,7 @@ export async function installSharedRuntime(config) {
     const before=JSON.stringify(trip);
     capture();
     if(JSON.stringify(trip)===before)return;
-    dirty=JSON.stringify(trip)!==JSON.stringify(base);syncPaused=false;await persist();controls();scheduleSync();
+    dirty=uploading||JSON.stringify(trip)!==JSON.stringify(base);syncPaused=false;await persist();controls();scheduleSync();
   });
   window.addEventListener('online',()=>{failures=0;scheduleSync(0);refresh(true);});document.addEventListener('visibilitychange',()=>refresh());window.addEventListener('focus',()=>refresh());
   window.addEventListener('beforeunload',e=>{if((dirty||legacyDraft||draftSaveFailed)&&!preview){e.preventDefault();e.returnValue='';}});
