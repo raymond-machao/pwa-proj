@@ -118,9 +118,7 @@ export function expenseRuntimeScript({ homeCurrency, currencyRates, distinctCurr
     return readExpenses().map(normExpense).filter(function(r) {
       if (filterDay && r.day !== filterDay) return false;
       if (filterCat && r.category !== filterCat) return false;
-      if (filterMem) {
-        if (r.payerId !== filterMem && (!r.participantIds || r.participantIds.indexOf(filterMem) === -1)) return false;
-      }
+      if (filterMem && expenseParticipants(r).indexOf(filterMem) === -1) return false;
       return true;
     });
   }
@@ -129,19 +127,35 @@ export function expenseRuntimeScript({ homeCurrency, currencyRates, distinctCurr
     return convertCurrency(r.amount + r.fee, r.currency, currentDisplayCur);
   }
 
+  // Resolve legacy empty participant lists exactly as settlement does.
+  function expenseParticipants(r) {
+    var ids = r.participantIds && r.participantIds.length ? r.participantIds : MEMBERS.map(function(m) { return m.id; });
+    var valid = ids.filter(function(id, index) { return byId(MEMBERS, id) && ids.indexOf(id) === index; });
+    var payer = r.payerId || (MEMBERS[0] ? MEMBERS[0].id : "");
+    return valid.length ? valid : (byId(MEMBERS, payer) ? [payer] : []);
+  }
+
+  function reportShare(r) {
+    if (!filterMem) return 1;
+    var ids = expenseParticipants(r);
+    return ids.indexOf(filterMem) === -1 ? 0 : 1 / ids.length;
+  }
+
+  function reportAmt(r) { return effAmt(r) * reportShare(r); }
+
   function renderTotals(rows) {
     var total = 0, i;
-    for (i = 0; i < rows.length; i++) { total += effAmt(rows[i]); }
+    for (i = 0; i < rows.length; i++) { total += reportAmt(rows[i]); }
     var people = MEMBERS.length ? MEMBERS.length : 1;
     var curPills = CURRENCIES.map(function(c) {
       return '<button type="button" class="cur-pill' + (c === currentDisplayCur ? ' active' : '') + '" data-cur="' + esc(c) + '">' + esc(c) + '</button>';
     }).join("");
-    return '<div class="tcard-row"><div class="tcard"><span>總支出</span><b>' + fmt(total) + ' <small>' + esc(currentDisplayCur) + '</small></b></div>' + (MEMBERS.length ? '<div class="tcard"><span>人均分攤</span><b>' + fmt(total / people) + ' <small>' + esc(currentDisplayCur) + '</small></b></div>' : '') + '</div><div class="cur-switcher-row"><span>計價幣別</span><div class="cur-pills">' + curPills + '</div></div>';
+    return '<div class="tcard-row"><div class="tcard"><span>總支出</span><b>' + fmt(total) + ' <small>' + esc(currentDisplayCur) + '</small></b></div>' + (MEMBERS.length ? '<div class="tcard"><span>人均分攤</span><b>' + (filterMem ? '－' : fmt(total / people) + ' <small>' + esc(currentDisplayCur) + '</small>') + '</b></div>' : '') + '</div><div class="cur-switcher-row"><span>計價幣別</span><div class="cur-pills">' + curPills + '</div></div>';
   }
 
   function renderDonut(rows) {
     var aggr = {};
-    rows.forEach(function(r) { var k = r.category || "其他"; aggr[k] = (aggr[k] || 0) + effAmt(r); });
+    rows.forEach(function(r) { var k = r.category || "其他"; aggr[k] = (aggr[k] || 0) + reportAmt(r); });
     var keys = Object.keys(aggr).filter(function(k) { return aggr[k] > 0; });
     keys.sort(function(a, b) { return aggr[b] - aggr[a]; });
     var total = 0; keys.forEach(function(k) { total += aggr[k]; });
@@ -166,7 +180,7 @@ export function expenseRuntimeScript({ homeCurrency, currencyRates, distinctCurr
 
   function renderRankBars(rows) {
     var aggr = {};
-    rows.forEach(function(r) { var k = r.category || "其他"; aggr[k] = (aggr[k] || 0) + effAmt(r); });
+    rows.forEach(function(r) { var k = r.category || "其他"; aggr[k] = (aggr[k] || 0) + reportAmt(r); });
     var keys = Object.keys(aggr).filter(function(k) { return aggr[k] > 0; });
     keys.sort(function(a, b) { return aggr[b] - aggr[a]; });
     if (!keys.length) return '<p class="empty">尚無花費資料</p>';
@@ -181,7 +195,7 @@ export function expenseRuntimeScript({ homeCurrency, currencyRates, distinctCurr
   function renderDailyBars(rows) {
     var aggr = {};
     DAYS.forEach(function(d) { aggr[d.id] = 0; });
-    rows.forEach(function(r) { aggr[r.day] = (aggr[r.day] || 0) + effAmt(r); });
+    rows.forEach(function(r) { aggr[r.day] = (aggr[r.day] || 0) + reportAmt(r); });
     var hasAny = false;
     DAYS.forEach(function(d) { if (aggr[d.id] > 0) hasAny = true; });
     if (!hasAny) return '<p class="empty">尚無每日花費資料</p>';
@@ -203,9 +217,7 @@ export function expenseRuntimeScript({ homeCurrency, currencyRates, distinctCurr
       if (bal[payer] === undefined) return;
       var total = effAmt(r);
       paid[payer] += total;
-      var participants = (r.participantIds && r.participantIds.length) ? r.participantIds : MEMBERS.map(function(m) { return m.id; });
-      var validIds = participants.filter(function(pid) { return bal[pid] !== undefined; });
-      if (!validIds.length) validIds = [payer];
+      var validIds = expenseParticipants(r);
       var perShare = total / validIds.length;
       bal[payer] += total;
       validIds.forEach(function(pid) {
@@ -252,12 +264,12 @@ export function expenseRuntimeScript({ homeCurrency, currencyRates, distinctCurr
     DAYS.forEach(function(d, idx) {
       var items = groups[d.id];
       if (!items || !items.length) return;
-      var total = 0; items.forEach(function(it) { total += effAmt(it); });
+      var total = 0; items.forEach(function(it) { total += reportAmt(it); });
       var label = d.id === "day-0" ? "Day 0 · 行前支出" : ("Day " + idx + " · " + (d.date || "") + (d.title ? " " + d.title : ""));
       var rowsHtml = items.map(function(r) {
         var isDiff = r.currency !== currentDisplayCur;
-        var eqAmt = convertCurrency(r.amount + r.fee, r.currency, currentDisplayCur);
-        var primaryAmt = fmt(r.amount + r.fee) + " " + esc(r.currency);
+        var eqAmt = reportAmt(r);
+        var primaryAmt = fmt((r.amount + r.fee) * reportShare(r)) + " " + esc(r.currency);
         var subAmt = isDiff ? ("(" + fmt(eqAmt) + " " + esc(currentDisplayCur) + ")") : "";
         var catName = (r.category || "其他").slice(0, 4);
         var catSpans = Array.from(catName).map(function(ch) { return "<span>" + esc(ch) + "</span>"; }).join("");
@@ -294,7 +306,7 @@ export function expenseRuntimeScript({ homeCurrency, currencyRates, distinctCurr
       return '<div class="pop-cur-row"><span class="pop-cur-code">' + esc(c) + '</span><b class="pop-cur-val">' + fmt(val) + '</b>' + (isOrig ? '<span class="pop-orig-tag">原幣</span>' : '') + '</div>';
     }).join("");
     var participants = (row.participantIds && row.participantIds.length) ? row.participantIds.map(memberName).filter(Boolean).join(", ") : "全員";
-    pop.innerHTML = '<div class="pop-header"><strong>' + esc(row.description || row.category || "消費") + '</strong><span class="pop-cat">' + esc(row.category || "其他") + '</span></div><div class="pop-currencies">' + curRows + '</div><div class="pop-meta"><div>付款人：<b>' + esc(payerOf(row)) + '</b></div><div>分攤人：<span>' + esc(participants) + '</span></div></div><div class="pop-hint">放開即可關閉</div>';
+    pop.innerHTML = '<div class="pop-header"><strong>' + esc(row.description || row.category || "消費") + '</strong><span class="pop-cat">' + (isEn() ? 'Full amount · ' : '整筆金額 · ') + esc(row.category || "其他") + '</span></div><div class="pop-currencies">' + curRows + '</div><div class="pop-meta"><div>付款人：<b>' + esc(payerOf(row)) + '</b></div><div>分攤人：<span>' + esc(participants) + '</span></div></div><div class="pop-hint">放開即可關閉</div>';
     document.body.appendChild(pop);
     var rect = targetEl.getBoundingClientRect();
     var top = Math.max(10, rect.top - pop.offsetHeight - 8);
@@ -477,7 +489,7 @@ export function expenseRuntimeScript({ homeCurrency, currencyRates, distinctCurr
     });
 
     document.querySelectorAll(".settlement-container").forEach(function(settleEl) {
-      settleEl.innerHTML = renderSettlement(rows);
+      settleEl.innerHTML = renderSettlement(readExpenses().map(normExpense));
     });
 
     updateCatChartVisibility();
