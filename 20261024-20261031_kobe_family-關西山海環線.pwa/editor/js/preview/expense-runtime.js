@@ -469,6 +469,19 @@ export function expenseRuntimeScript({ homeCurrency, currencyRates, distinctCurr
   }
 
   function renderExpenseReport() {
+    // Shared-trip redraws replace the controls, but keep this runtime's filters.
+    // Restore the visible choices before rendering amounts (also across languages).
+    function syncFilter(selector, value) {
+      var selects = Array.from(document.querySelectorAll('#mobile-content .expense-report ' + selector));
+      if (value && !selects.some(function(select) {
+        return Array.from(select.options).some(function(option) { return option.value === value; });
+      })) value = '';
+      selects.forEach(function(select) { select.value = value; });
+      return value;
+    }
+    filterDay = syncFilter('.efilter-day', filterDay);
+    filterCat = syncFilter('.efilter-cat', filterCat);
+    filterMem = syncFilter('.efilter-mem', filterMem);
     var rows = getFilteredRows();
     document.querySelectorAll("#mobile-content .expense-report").forEach(function(rep) {
 
