@@ -122,6 +122,9 @@ self.addEventListener('message',e=>{
     for(const path of Object.keys(manifest.files))if(!await dest.match(new URL(path,SCOPE).href))throw Error('Release not staged');
     const previous=await active();
     const m=await caches.open(META);await m.put(pointer,new Response(name));
+    // A committed release supersedes any earlier one-time recovery handoff.
+    // Otherwise navigation can silently roll back the successful update.
+    await m.delete(recoveryPointer);
     // Keep a complete fallback; do not prune caches while another page is open.
     try{if((await self.clients.matchAll({type:'window',includeUncontrolled:true})).filter(client=>client.url.startsWith(SCOPE)).length<=1){
      const keys=await caches.keys();
